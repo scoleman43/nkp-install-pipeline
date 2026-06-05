@@ -1,0 +1,9 @@
+.nkp_phase3_cache.env
+.nkp_version.env
+.nkp_image.env
+.nkp_cluster.env
+*.tar.gz
+*.tar
+*.conf
+*.crt
+*.key
