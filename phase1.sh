@@ -10,9 +10,13 @@ set -euo pipefail
 export REGISTRY_PORT="5000"
 export REGISTRY_DIR="/opt/registry/data"
 export REGISTRY_CERTS_DIR="/opt/registry/certs"
-export REGISTRY_IP=$(hostname -I | awk '{print $1}')
+
+# SC2155 Fix: Declare and assign separately
+REGISTRY_IP=$(hostname -I | awk '{print $1}')
+export REGISTRY_IP
 export REGISTRY_URL="${REGISTRY_IP}:${REGISTRY_PORT}"
 
+# shellcheck disable=SC1091
 if [ -f /etc/os-release ]; then . /etc/os-release; OS=$ID; else echo "Unsupported OS."; exit 1; fi
 
 echo "Please authenticate sudo so we can configure the system uninterrupted:"
@@ -25,7 +29,9 @@ if [ -z "${INSTALL_MODE:-}" ]; then
     echo "--- Select Bastion Installation Mode ---"
     echo "1) Internet-Based (Direct or via Corporate Proxy)"
     echo "2) Dark Site / Air-Gapped (Requires 'nkp-prereqs-bundle.tar.gz')"
-    read -p "Select Mode (1 or 2): " MODE_SELECTION
+    
+    # SC2162 Fix: Added -r flag to all read commands
+    read -r -p "Select Mode (1 or 2): " MODE_SELECTION
     
     if [ "$MODE_SELECTION" == "2" ]; then
         export INSTALL_MODE="dark"
@@ -57,11 +63,11 @@ if [ -z "${INSTALL_MODE:-}" ]; then
         
         echo "--- Checking Network / Proxy Requirements ---"
         if [ -z "${http_proxy:-}" ]; then
-            read -p "Do you need to configure a proxy for outbound internet access? (y/N): " needs_proxy
+            read -r -p "Do you need to configure a proxy for outbound internet access? (y/N): " needs_proxy
             if [[ "$needs_proxy" =~ ^[Yy] ]]; then
                 export USE_PROXY="true"
-                read -p "Proxy URL (e.g., http://proxy.corp.local:3128): " PROXY_URL
-                read -p "NO_PROXY list (default: 127.0.0.1,localhost,192.168.0.0/16,10.0.0.0/16): " NO_PROXY_INPUT
+                read -r -p "Proxy URL (e.g., http://proxy.corp.local:3128): " PROXY_URL
+                read -r -p "NO_PROXY list (default: 127.0.0.1,localhost,192.168.0.0/16,10.0.0.0/16): " NO_PROXY_INPUT
                 export PROXY_URL="${PROXY_URL}"
                 export NO_PROXY="${NO_PROXY_INPUT:-127.0.0.1,localhost,192.168.0.0/16,10.0.0.0/16}"
             else
@@ -70,7 +76,7 @@ if [ -z "${INSTALL_MODE:-}" ]; then
         else
             export USE_PROXY="true"
             export PROXY_URL="${http_proxy}"
-            read -p "NO_PROXY list (default: 127.0.0.1,localhost,192.168.0.0/16,10.0.0.0/16): " NO_PROXY_INPUT
+            read -r -p "NO_PROXY list (default: 127.0.0.1,localhost,192.168.0.0/16,10.0.0.0/16): " NO_PROXY_INPUT
             export NO_PROXY="${NO_PROXY_INPUT:-127.0.0.1,localhost,192.168.0.0/16,10.0.0.0/16}"
         fi
 
@@ -112,6 +118,9 @@ gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
     
     # Reload script into UI mode with the chosen environment variables applied
     if command -v gum &> /dev/null; then
+        echo "Dependencies installed successfully. Reloading script into UI mode..."
+        sleep 1.5
+        clear
         exec bash "$0" "$@"
     else
         echo "ERROR: Failed to initialize 'gum' UI."
@@ -137,21 +146,33 @@ if [ "$DOWNLOAD_BUNDLE" == "Yes" ]; then
     gum style --foreground 212 "Presigned URL:"
     read -r BUNDLE_URL
     export BUNDLE_URL="${BUNDLE_URL}"
-    export NKP_VERSION=$(echo "${BUNDLE_URL}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1 || true)
+    
+    # SC2155 Fix
+    NKP_VERSION=$(echo "${BUNDLE_URL}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1 || true)
+    export NKP_VERSION
+    
     if [ -z "$NKP_VERSION" ]; then
-        export NKP_VERSION=$(gum input --prompt "Version not found in URL. Enter NKP Version: " --value "v2.17.1")
+        NKP_VERSION=$(gum input --prompt "Version not found in URL. Enter NKP Version: " --value "v2.17.1")
+        export NKP_VERSION
     fi
     export BUNDLE_ARCHIVE="nkp-air-gapped-bundle_${NKP_VERSION}_linux_amd64.tar.gz"
     gum style --foreground 82 "✔ Auto-detected Version: ${NKP_VERSION}"
 else
     export DOWNLOAD_BUNDLE="false"
-    export BUNDLE_ARCHIVE=$(ls nkp-air-gapped-bundle_v*_linux_amd64.tar.gz 2>/dev/null | head -n 1 || true)
+    
+    # shellcheck disable=SC2012
+    BUNDLE_ARCHIVE=$(ls nkp-air-gapped-bundle_v*_linux_amd64.tar.gz 2>/dev/null | head -n 1 || true)
+    export BUNDLE_ARCHIVE
     
     if [ -z "${BUNDLE_ARCHIVE}" ] || [ ! -f "${BUNDLE_ARCHIVE}" ]; then
         gum style --foreground 196 "❌ ERROR: No bundle found. Please place the .tar.gz file here and retry."
         exit 1
     fi
-    export NKP_VERSION=$(echo "${BUNDLE_ARCHIVE}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1 || true)
+    
+    # SC2155 Fix
+    NKP_VERSION=$(echo "${BUNDLE_ARCHIVE}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1 || true)
+    export NKP_VERSION
+    
     gum style --foreground 82 "✔ Detected local bundle: ${BUNDLE_ARCHIVE} (${NKP_VERSION})"
 fi
 
@@ -162,6 +183,35 @@ echo "export BUNDLE_ARCHIVE=\"${BUNDLE_ARCHIVE}\"" >> .nkp_version.env
 # STEP 2: SYSTEM INSTALLATION & PREPARATION
 # ==============================================================================
 gum style --foreground 212 -- "--- Beginning System Configuration ---"
+
+# Install Docker and core dependencies if in internet mode
+if [ "${INSTALL_MODE}" == "internet" ]; then
+    gum style --foreground 240 "Installing OS Prerequisites (Kubectl, Docker, Networking Tools)..."
+    if [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
+        sudo yum install -y -q yum-utils bzip2 wget curl openssl tar socat conntrack
+        cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo > /dev/null
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+        sudo yum install -y -q kubectl
+        sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo > /dev/null
+        sudo yum install -y -q docker-ce docker-ce-cli containerd.io
+    elif [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
+        sudo apt-get update -y -qq && sudo apt-get install -y -qq apt-transport-https ca-certificates curl wget bzip2 software-properties-common openssl tar socat conntrack
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list > /dev/null
+        sudo apt-get update -y -qq && sudo apt-get install -y -qq kubectl
+        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        sudo chmod a+r /etc/apt/keyrings/docker.asc
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update -y -qq && sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io
+    fi
+fi
 
 # Start Docker and ensure permissions
 if [ "${INSTALL_MODE}" == "internet" ] && [ "${USE_PROXY}" == "true" ]; then
