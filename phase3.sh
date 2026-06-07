@@ -30,7 +30,8 @@ fi
 
 # --- Default Variables ---
 export CLUSTER_NAME="nkp-prod-01"
-export REGISTRY_IP=$(hostname -I | awk '{print $1}')
+REGISTRY_IP=$(hostname -I | awk '{print $1}')
+export REGISTRY_IP
 export REGISTRY_URL="${REGISTRY_IP}:5000" 
 export REGISTRY_CA="/opt/registry/certs/domain.crt" 
 export PC_ENDPOINT="192.168.43.43" 
@@ -51,30 +52,52 @@ CACHE_FILE=".nkp_phase3_cache.env"
 if [ -f "$CACHE_FILE" ]; then
     gum style --foreground 240 "Loading previous configuration cache..."
     source "$CACHE_FILE"
+    sleep 1
 fi
+
+# Clear the screen to start the UI fresh at the top of the terminal
+clear
 
 gum style --border double --margin "1" --padding "1 2" --border-foreground 212 "NKP Phase 3: Nutanix Cluster Deployment"
 
 gum style --foreground 99 -- "--- Cluster Identity & Sizing ---"
-export CLUSTER_NAME=$(gum input --prompt "Cluster Name: " --value "${CLUSTER_NAME}")
-export CP_VIP=$(gum input --prompt "Control Plane VIP (Unused IP): " --value "${CONTROL_PLANE_VIP}")
-export METALLB_IP_RANGE=$(gum input --prompt "MetalLB IP Range: " --value "${METALLB_IP_RANGE}")
+INPUT_CLUSTER=$(gum input --prompt "Cluster Name: " --placeholder "${CLUSTER_NAME}")
+export CLUSTER_NAME="${INPUT_CLUSTER:-${CLUSTER_NAME}}"
+
+INPUT_VIP=$(gum input --prompt "Control Plane VIP (Unused IP): " --placeholder "${CONTROL_PLANE_VIP}")
+export CP_VIP="${INPUT_VIP:-${CONTROL_PLANE_VIP}}"
+
+INPUT_METALLB=$(gum input --prompt "MetalLB IP Range: " --placeholder "${METALLB_IP_RANGE}")
+export METALLB_IP_RANGE="${INPUT_METALLB:-${METALLB_IP_RANGE}}"
+
 export CONTROL_PLANE_REPLICAS=$(gum choose --header "Number of Control Plane Nodes (Must be odd):" "1" "3" "5")
-export WORKER_REPLICAS=$(gum input --prompt "Number of Worker Nodes: " --value "${WORKER_REPLICAS}")
+
+INPUT_WORKER=$(gum input --prompt "Number of Worker Nodes: " --placeholder "${WORKER_REPLICAS}")
+export WORKER_REPLICAS="${INPUT_WORKER:-${WORKER_REPLICAS}}"
 
 gum style --foreground 99 -- "--- Nutanix Prism Details ---"
-export PC_ENDPOINT=$(gum input --prompt "Prism Central IP/FQDN (NO https://): " --value "${PC_ENDPOINT}")
-export NUTANIX_USER=$(gum input --prompt "Prism Central Username: " --value "${NUTANIX_USER}")
+INPUT_PC=$(gum input --prompt "Prism Central IP/FQDN (NO https://): " --placeholder "${PC_ENDPOINT}")
+export PC_ENDPOINT="${INPUT_PC:-${PC_ENDPOINT}}"
+
+INPUT_USER=$(gum input --prompt "Prism Central Username: " --placeholder "${NUTANIX_USER}")
+export NUTANIX_USER="${INPUT_USER:-${NUTANIX_USER}}"
 
 if [ -n "$NUTANIX_PASSWORD" ]; then
-    export NUTANIX_PASSWORD=$(gum input --password --prompt "Prism Central Password [*** CACHED ***]: " --value "${NUTANIX_PASSWORD}")
+    INPUT_PASS=$(gum input --password --prompt "Prism Central Password [*** CACHED ***]: " --placeholder "Press Enter to keep cached password")
+    export NUTANIX_PASSWORD="${INPUT_PASS:-${NUTANIX_PASSWORD}}"
 else
-    export NUTANIX_PASSWORD=$(gum input --password --prompt "Prism Central Password: " --placeholder "Type your password...")
+    INPUT_PASS=$(gum input --password --prompt "Prism Central Password: " --placeholder "Type your password...")
+    export NUTANIX_PASSWORD="${INPUT_PASS:-${NUTANIX_PASSWORD}}"
 fi
 
-export PE_CLUSTER=$(gum input --prompt "Prism Element Cluster Name (Case-Sensitive): " --value "${PE_CLUSTER}")
-export SUBNET=$(gum input --prompt "Subnet UUID: " --value "${SUBNET}")
-export STORAGE_CONTAINER=$(gum input --prompt "CSI Storage Container Name: " --value "${STORAGE_CONTAINER}")
+INPUT_PE=$(gum input --prompt "Prism Element Cluster Name (Case-Sensitive): " --placeholder "${PE_CLUSTER}")
+export PE_CLUSTER="${INPUT_PE:-${PE_CLUSTER}}"
+
+INPUT_SUBNET=$(gum input --prompt "Subnet UUID: " --placeholder "${SUBNET}")
+export SUBNET="${INPUT_SUBNET:-${SUBNET}}"
+
+INPUT_STORAGE=$(gum input --prompt "CSI Storage Container Name: " --placeholder "${STORAGE_CONTAINER}")
+export STORAGE_CONTAINER="${INPUT_STORAGE:-${STORAGE_CONTAINER}}"
 
 # Cache the answers for next time using bulletproof echo statements
 {
@@ -102,6 +125,10 @@ if [ "$CONFIRM" == "No, Cancel" ]; then
     gum style --foreground 226 "Deployment cancelled by user."
     exit 0
 fi
+
+# FIX: Refresh the environment file right here, immediately after confirmation!
+# Even if the deployment fails later, Phase 4 will always have the correct target info.
+echo "export CLUSTER_NAME=\"${CLUSTER_NAME}\"" > .nkp_cluster.env
 
 # Export credentials for the NKP CLI to consume natively
 export NUTANIX_USER="${NUTANIX_USER}"
@@ -159,8 +186,6 @@ fi
 if [ -n "${SUDO_USER:-}" ]; then
     chown "${SUDO_USER}:${SUDO_USER}" "${CLUSTER_NAME}.conf" || true
 fi
-
-echo "export CLUSTER_NAME=\"${CLUSTER_NAME}\"" > .nkp_cluster.env
 
 gum style --border normal --margin "1" --padding "1 2" --border-foreground 82 "🎉 SUCCESS! The Kubernetes cluster '${CLUSTER_NAME}' has been fully provisioned and self-managed."
 
