@@ -7,7 +7,7 @@
 set -euo pipefail
 
 BUNDLE_DIR="nkp-prereqs-bundle"
-mkdir -p "${BUNDLE_DIR}/packages" "${BUNDLE_DIR}/binaries" "${BUNDLE_DIR}/images"
+mkdir -p "${BUNDLE_DIR}/packages" "${BUNDLE_DIR}/binaries" "${BUNDLE_DIR}/harbor"
 
 if [ -f /etc/os-release ]; then . /etc/os-release; OS=$ID; else echo "Unsupported OS."; exit 1; fi
 
@@ -23,26 +23,23 @@ mv "${BUNDLE_DIR}/binaries/gum_${GUM_VERSION}_Linux_x86_64/gum" "${BUNDLE_DIR}/b
 rm -rf "${BUNDLE_DIR}/binaries/gum_${GUM_VERSION}_Linux_x86_64"
 chmod +x "${BUNDLE_DIR}/binaries/gum"
 
-echo "=== 2. Downloading Docker Registry Image ==="
-if ! command -v docker &> /dev/null; then
-    echo "ERROR: Docker is required on this build machine to download the registry image."
-    exit 1
-fi
-docker pull registry:2
-docker save registry:2 -o "${BUNDLE_DIR}/images/registry-2.tar"
+echo "=== 2. Downloading Enterprise Harbor (Offline Installer) ==="
+HARBOR_VERSION="v2.10.3"
+echo "Downloading Harbor ${HARBOR_VERSION} (This is ~700MB, please wait)..."
+curl -sSL -o "${BUNDLE_DIR}/harbor/harbor-offline-installer-${HARBOR_VERSION}.tgz" "https://github.com/goharbor/harbor/releases/download/${HARBOR_VERSION}/harbor-offline-installer-${HARBOR_VERSION}.tgz"
 
 echo "=== 3. Downloading OS Packages (Offline Installers) ==="
 if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
     sudo apt-get update -y -qq
     sudo apt-get install -y -qq apt-transport-https ca-certificates curl software-properties-common
     sudo install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg || true
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
     sudo apt-get update -y -qq
     
     cd "${BUNDLE_DIR}/packages"
-    # Download packages and their dependencies without installing them
-    sudo apt-get download docker-ce docker-ce-cli containerd.io socat conntrack wget curl bzip2 tar openssl || true
+    # Added docker-compose-plugin to the download list
+    sudo apt-get download docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack wget curl bzip2 tar openssl || true
     cd ../..
 
 elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
@@ -50,8 +47,8 @@ elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
     sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo > /dev/null
     
     cd "${BUNDLE_DIR}/packages"
-    # Download packages and their dependencies without installing them
-    sudo yumdownloader --resolve --quiet --destdir=. docker-ce docker-ce-cli containerd.io socat conntrack wget curl bzip2 tar openssl
+    # Added docker-compose-plugin to the download list
+    sudo yumdownloader --resolve --quiet --destdir=. docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack wget curl bzip2 tar openssl
     cd ../..
 fi
 
