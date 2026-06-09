@@ -52,6 +52,28 @@ Before running the pipeline, ensure your core infrastructure meets these require
 
 ## 🚀 Quick Start Guide: Initial Deployment
 
+To execute the air-gapped installation script, you will first need to provision a Linux bastion VM within your Nutanix environment. We recommend using Ubuntu Server for this host. 
+
+### VM Specifications
+Ensure your bastion VM meets the following minimum requirements:
+* **vCPUs:** 2
+* **Memory (RAM):** 12 GB
+* **Storage:** 100 GB minimum *(Note: When creating the disk from the source image, you must explicitly expand the size to at least 100GB to accommodate the NAI bundles and container images).*
+
+### Source Image
+You can use the official Ubuntu Resolute cloud image. Download or provide the following URL to your cluster:
+> `https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img`
+
+### Cloud-Init Configuration
+To ensure you have immediate access to the VM, use the following `cloud-init` script during the VM creation process. This will configure the default `ubuntu` user with a set password, disable password expiration, and enable SSH password authentication.
+
+**Custom Script (Cloud-Config):**
+```yaml
+#cloud-config
+password: password1
+chpasswd: { expire: False }
+ssh_pwauth: True
+
 ### Step 1: Stage the Bastion
 Transfer the installation scripts to the home directory of your Bastion host and make them executable:
 
