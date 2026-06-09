@@ -7,6 +7,9 @@
 
 set -euo pipefail
 
+# FIX: Force 256-color support for standalone 'gum' binary in PuTTY/Web Consoles
+export TERM="xterm-256color"
+
 export REGISTRY_PORT="5000"
 export REGISTRY_CERTS_DIR="/opt/registry/certs"
 export HARBOR_VERSION="v2.10.3"
@@ -327,6 +330,11 @@ fi
 
 if [ "${INSTALL_MODE}" == "dark" ]; then
     sudo rm -rf nkp-prereqs-bundle
+fi
+
+# FIX: Persist 256-color terminal setting for Phase 2 & Phase 3
+if ! grep -q "export TERM=xterm-256color" "$HOME/.bashrc"; then
+    echo "export TERM=xterm-256color" >> "$HOME/.bashrc"
 fi
 
 gum style --border normal --margin "1" --padding "1 2" --border-foreground 82 "Phase 1 Complete! IMPORTANT: Please log out and log back in for Docker group changes to apply."
