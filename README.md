@@ -111,6 +111,7 @@ You only need the scripts. The pipeline will automatically prompt you for a pres
 ```
 1. Select **Use a Pre-Built Image** *(Highly recommended for air-gapped topologies to bypass the need for temporary builder VMs or local OS mirrors)*.
 2. Enter the exact, case-sensitive name of the NKP QCOW2 image as it appears in your Prism Central Image Configuration UI.
+3. You also have the option to build a **Custom Image** which will automate preparing and creating the OS of your choice as a image option in PC. 
 
 ### Step 4: Run Phase 3 (Cluster Deployment)
 ```bash
