@@ -16,11 +16,9 @@ echo "=== 1. Downloading Binaries (kubectl & gum) ==="
 curl -sSL -o "${BUNDLE_DIR}/binaries/kubectl" "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 chmod +x "${BUNDLE_DIR}/binaries/kubectl"
 
-# Download Gum UI standalone binary
+# Download Gum UI standalone binary (Fixed for root-level extraction)
 GUM_VERSION="0.13.0"
-curl -sSL "https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}/gum_${GUM_VERSION}_Linux_x86_64.tar.gz" | tar -xz -C "${BUNDLE_DIR}/binaries/" "gum_${GUM_VERSION}_Linux_x86_64/gum"
-mv "${BUNDLE_DIR}/binaries/gum_${GUM_VERSION}_Linux_x86_64/gum" "${BUNDLE_DIR}/binaries/gum"
-rm -rf "${BUNDLE_DIR}/binaries/gum_${GUM_VERSION}_Linux_x86_64"
+curl -sSL "https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}/gum_${GUM_VERSION}_Linux_x86_64.tar.gz" | tar -xz -C "${BUNDLE_DIR}/binaries/" gum
 chmod +x "${BUNDLE_DIR}/binaries/gum"
 
 echo "=== 2. Downloading Enterprise Harbor (Offline Installer) ==="
@@ -38,7 +36,6 @@ if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
     sudo apt-get update -y -qq
     
     cd "${BUNDLE_DIR}/packages"
-    # Added docker-compose-plugin to the download list
     sudo apt-get download docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack wget curl bzip2 tar openssl || true
     cd ../..
 
@@ -47,7 +44,6 @@ elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
     sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo > /dev/null
     
     cd "${BUNDLE_DIR}/packages"
-    # Added docker-compose-plugin to the download list
     sudo yumdownloader --resolve --quiet --destdir=. docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack wget curl bzip2 tar openssl
     cd ../..
 fi
