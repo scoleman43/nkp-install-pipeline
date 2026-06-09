@@ -92,7 +92,7 @@ You must manually transfer both `.tar.gz` bundles into the same directory before
 └── nkp-prereqs-bundle.tar.gz
 ```
 The ```nkp-air-gapped-bundle_v2.17.1_linux_amd64.tar.gz``` can be downloaded from the Nutanix support portal.
-The ```nkp-prereqs-bundle.tar.gz``` can be doenloaded from the GitHub Releases section on the main nkp-install-pipeline page.  
+The ```nkp-prereqs-bundle.tar.gz``` can be downloaded from the GitHub Releases section on the main nkp-install-pipeline page.  
 
 **For Internet-Assisted Bastion Installs:**
 You only need the scripts. The pipeline will automatically prompt you for a presigned Nutanix URL and leverage the Bastion's temporary connection to pull down the required installation bundles into the local staging environment.
