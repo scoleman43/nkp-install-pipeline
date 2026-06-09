@@ -1,6 +1,6 @@
 # 🚀 NKP Install Pipeline (Air-Gapped Infrastructure Engine)
 
-An end-to-end, highly resilient automation pipeline for deploying the **Nutanix Kubernetes Platform (NKP)** inside strictly air-gapped (Dark Site) computing environments.
+An end-to-end, highly resilient automation pipeline for deploying and managing the **Nutanix Kubernetes Platform (NKP)** inside strictly air-gapped (Dark Site) computing environments.
 
 > **⚠️ CRUCIAL ARCHITECTURE NOTE** > This pipeline is exclusively designed to provision air-gapped infrastructure. Whether the Bastion host operates completely offline (*Dark Site Mode*) or utilizes a transient internet connection to stream down binaries on-the-fly (*Internet Mode*), the target Nutanix environment, the node images, and the resulting Kubernetes cluster are **100% isolated and air-gapped**.
 
@@ -13,13 +13,13 @@ An end-to-end, highly resilient automation pipeline for deploying the **Nutanix 
 * **Local Enterprise Harbor Registry:** Automatically deploys and configures a self-contained Harbor registry with auto-generated SSL certificates and an isolated `/nkp` project architecture.
 * **Interactive Terminal UI:** Built with `charmbracelet/gum` for a beautiful, error-resistant, menu-driven installation experience (with full 256-color support).
 * **Smart Credential Caching:** Caches Nutanix Prism Central credentials and network details between runs to survive network timeouts without forcing manual re-entry.
-* **Self-Managed Magic:** Combines Cluster API (Phase 3) and Kommander Management Plane installations into a single, seamless execution using the `--self-managed` architecture to bypass GitOps TLS proxy limitations.
+* **Day 2 Operations Support:** Includes native upgrade scripts to seamlessly orchestrate zero-downtime cluster upgrades when new versions of NKP are released.
 
 ---
 
 ## 🏗 Architecture Overview
 
-The pipeline breaks the NKP installation down into a streamlined, sequential workflow:
+The pipeline breaks the NKP lifecycle down into a streamlined, sequential workflow:
 
 | Phase | Script | Purpose |
 | :--- | :--- | :--- |
@@ -27,6 +27,7 @@ The pipeline breaks the NKP installation down into a streamlined, sequential wor
 | **1** | `phase1.sh` | **Bastion & Harbor Registry:** Configures local Docker runtimes, generates SSL keys, and spins up your isolated local Harbor registry. |
 | **2** | `phase2.sh` | **OS Image Staging:** Connects to Nutanix Prism Central to stage the base QCOW2 image for the Kubernetes nodes. |
 | **3** | `phase3.sh` | **Cluster Deployment:** Pushes 12GB+ of Nutanix container images into Harbor, bootstraps the isolated cluster via CAPI, and outputs UI dashboard credentials. |
+| **Day 2** | `nkp-upgrade.sh` | **Cluster Upgrades:** Stablishes a clean path for pushing updated container bundles into Harbor and orchestrating a rolling cluster upgrade. |
 
 ---
 
@@ -49,13 +50,13 @@ Before running the pipeline, ensure your core infrastructure meets these require
 
 ---
 
-## 🚀 Quick Start Guide
+## 🚀 Quick Start Guide: Initial Deployment
 
 ### Step 1: Stage the Bastion
-Transfer the three installation scripts to the home directory of your Bastion host and make them executable:
+Transfer the installation scripts to the home directory of your Bastion host and make them executable:
 
 ```bash
-chmod +x phase1.sh phase2.sh phase3.sh
+chmod +x phase1.sh phase2.sh phase3.sh nkp-upgrade.sh
 ```
 
 **For True Dark Site Installs (Physical Media Transfer):**
@@ -64,12 +65,13 @@ You must manually transfer both `.tar.gz` bundles into the same directory before
 ├── phase1.sh
 ├── phase2.sh
 ├── phase3.sh
+├── nkp-upgrade.sh
 ├── nkp-air-gapped-bundle_v2.17.1_linux_amd64.tar.gz
 └── nkp-prereqs-bundle.tar.gz
 ```
 
 **For Internet-Assisted Bastion Installs:**
-You only need the three scripts. The pipeline will automatically prompt you for a presigned Nutanix URL and leverage the Bastion's temporary connection to pull down the required installation bundles into the local staging environment.
+You only need the scripts. The pipeline will automatically prompt you for a presigned Nutanix URL and leverage the Bastion's temporary connection to pull down the required installation bundles into the local staging environment.
 
 ### Step 2: Run Phase 1 (Bastion & Registry Setup)
 ```bash
@@ -93,6 +95,23 @@ You only need the three scripts. The pipeline will automatically prompt you for 
 1. Enter your target Nutanix sizing, IP schemes, and Prism Central details.
 2. Confirm deployment. The script will dynamically read your cached parameters and securely authenticate your local Docker engine against Harbor.
 3. **Grab your Credentials:** Upon clean validation of the newly generated cluster config file, the script will print the active cluster URL, management username, and secure password to access your local Kommander dashboard.
+
+---
+
+## 🔄 Day 2 Operations: Upgrading NKP
+
+When a new version of Nutanix Kubernetes Platform is released, upgrading your air-gapped cluster is fully automated via the `nkp-upgrade.sh` script.
+
+### Step 1: Stage the New Bundle
+Either transfer the new `.tar.gz` bundle to your Bastion directory manually, or have a presigned Nutanix URL ready.
+
+### Step 2: Execute the Upgrade
+```bash
+./nkp-upgrade.sh
+```
+1. The script will validate your existing `kubeconfig` and Harbor credentials.
+2. It will ask if you are utilizing a local tarball or a presigned download URL.
+3. The new 12GB bundle will be unpacked, the local Harbor `/nkp` project will ingest the updated core container blueprints, and the CAPI upgrade sequence will be initiated against your cluster automatically.
 
 ---
 
