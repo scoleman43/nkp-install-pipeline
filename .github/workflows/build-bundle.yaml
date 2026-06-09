@@ -1,0 +1,37 @@
+name: Generate NKP Offline Bundle
+
+# 1. Triggers: Run weekly, or allow a manual button click in the UI
+on:
+  schedule:
+    - cron: '0 2 * * 0' # Runs every Sunday at 2:00 AM UTC
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    # 2. Compute: Use GitHub's free Ubuntu cloud runner (or change to 'self-hosted')
+    runs-on: ubuntu-latest 
+    permissions:
+      contents: write # Required to allow the bot to create a Release
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Make script executable and run it
+        run: |
+          chmod +x build_prereqs.sh
+          ./build_prereqs.sh
+
+      - name: Publish to GitHub Releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Generate a dynamic version tag based on today's date
+          TAG_NAME="v$(date +'%Y.%m.%d')"
+          
+          echo "Creating Release $TAG_NAME..."
+          
+          # Use the native GitHub CLI to create a release and attach the 800MB tarball
+          gh release create "$TAG_NAME" nkp-prereqs-bundle.tar.gz \
+            --title "NKP Prereqs Bundle - $(date +'%B %d, %Y')" \
+            --notes "Automated weekly build containing Harbor, kubectl, gum, and OS packages."
