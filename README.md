@@ -117,11 +117,6 @@ Either transfer the new `.tar.gz` bundle to your Bastion directory manually, or 
 
 ## 🛠 Troubleshooting & Detailed Technical Notes
 
-### 🎨 Terminal Colors Missing or Intermittent UI Rendering
-* **Symptom:** The `gum` interactive menus render in plain white monochrome, or text blocks skip without pausing for inputs.
-* **Root Cause:** `gum` utilizes 256-color ANSI rendering codes. Hypervisor consoles (Prism Central/vSphere Web Consoles) default to basic 8-color configurations (`vt100`). Additionally, pasting raw code blocks directly into a terminal overflows the buffer, forcing `gum` to instantly skip prompts.
-* **Resolution:** Always run the files directly (`./phase3.sh`). The pipeline explicitly injects `export TERM="xterm-256color"` into your profile. For the ultimate menu experience, use a dedicated modern SSH client (PuTTY, Windows Terminal, or macOS Terminal).
-
 ### 🔒 Harbor 401 Unauthorized Errors
 * **Symptom:** The image stream immediately errors out with `unexpected status code 401 Unauthorized` during the initial push steps.
 * **Root Cause:** Enterprise Harbor registries bar anonymous pushes to the root directory. If an image path is directed to the bare registry destination (`192.168.43.79:5000/calico/apiserver`), the infrastructure drops the connection.
