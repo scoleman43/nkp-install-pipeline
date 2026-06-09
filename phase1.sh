@@ -2,14 +2,14 @@
 # ==============================================================================
 # Script: 01_setup_bastion_registry.sh
 # Purpose: Prepares Bastion Host, configures Proxy OR Offline Bundle, automates 
-#          'gum' UI, generates SSH keys, and runs local registry.
+#          'gum' UI, generates SSH keys, and installs Enterprise Harbor Registry.
 # ==============================================================================
 
 set -euo pipefail
 
 export REGISTRY_PORT="5000"
-export REGISTRY_DIR="/opt/registry/data"
 export REGISTRY_CERTS_DIR="/opt/registry/certs"
+export HARBOR_VERSION="v2.10.3"
 
 # SC2155 Fix: Declare and assign separately
 REGISTRY_IP=$(hostname -I | awk '{print $1}')
@@ -30,14 +30,12 @@ if [ -z "${INSTALL_MODE:-}" ]; then
     echo "1) Internet-Based (Direct or via Corporate Proxy)"
     echo "2) Dark Site / Air-Gapped (Requires 'nkp-prereqs-bundle.tar.gz')"
     
-    # SC2162 Fix: Added -r flag to all read commands
     read -r -p "Select Mode (1 or 2): " MODE_SELECTION
     
     if [ "$MODE_SELECTION" == "2" ]; then
         export INSTALL_MODE="dark"
         export USE_PROXY="false"
         
-        # Verify bundle exists
         if [ ! -f "nkp-prereqs-bundle.tar.gz" ]; then
             echo "❌ ERROR: 'nkp-prereqs-bundle.tar.gz' not found in current directory."
             exit 1
@@ -53,7 +51,7 @@ if [ -z "${INSTALL_MODE:-}" ]; then
         echo "Installing offline OS packages..."
         if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
             sudo dpkg -i nkp-prereqs-bundle/packages/*.deb || true
-            sudo apt-get install -f -y || true # Fix any local dependency cross-links
+            sudo apt-get install -f -y || true 
         elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
             sudo rpm -Uvh --force --nodeps nkp-prereqs-bundle/packages/*.rpm
         fi
@@ -91,7 +89,6 @@ if [ -z "${INSTALL_MODE:-}" ]; then
             fi
         fi
         
-        # Install Gum UI via Internet
         if ! command -v gum &> /dev/null; then
             echo "--- Preparing the Installer UI ---"
             if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
@@ -116,7 +113,6 @@ gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
         exit 1
     fi
     
-    # Reload script into UI mode with the chosen environment variables applied
     if command -v gum &> /dev/null; then
         echo "Dependencies installed successfully. Reloading script into UI mode..."
         sleep 1.5
@@ -131,7 +127,7 @@ fi
 # ==============================================================================
 # STEP 1: INTERACTIVE CONFIGURATION (Powered by Gum)
 # ==============================================================================
-gum style --border double --margin "1" --padding "1 2" --border-foreground 212 "NKP Phase 1: Bastion Host & Registry Setup"
+gum style --border double --margin "1" --padding "1 2" --border-foreground 212 "NKP Phase 1: Bastion Host & Harbor Registry Setup"
 
 if [ "${INSTALL_MODE}" == "dark" ]; then
     export DOWNLOAD_BUNDLE="false"
@@ -147,7 +143,6 @@ if [ "$DOWNLOAD_BUNDLE" == "Yes" ]; then
     read -r BUNDLE_URL
     export BUNDLE_URL="${BUNDLE_URL}"
     
-    # SC2155 Fix
     NKP_VERSION=$(echo "${BUNDLE_URL}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1 || true)
     export NKP_VERSION
     
@@ -160,7 +155,6 @@ if [ "$DOWNLOAD_BUNDLE" == "Yes" ]; then
 else
     export DOWNLOAD_BUNDLE="false"
     
-    # shellcheck disable=SC2012
     BUNDLE_ARCHIVE=$(ls nkp-air-gapped-bundle_v*_linux_amd64.tar.gz 2>/dev/null | head -n 1 || true)
     export BUNDLE_ARCHIVE
     
@@ -169,15 +163,25 @@ else
         exit 1
     fi
     
-    # SC2155 Fix
     NKP_VERSION=$(echo "${BUNDLE_ARCHIVE}" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?' | head -n 1 || true)
     export NKP_VERSION
     
     gum style --foreground 82 "✔ Detected local bundle: ${BUNDLE_ARCHIVE} (${NKP_VERSION})"
 fi
 
+# Harbor Password Prompt
+export REGISTRY_USER="admin"
+gum style --foreground 99 -- "--- Harbor Administrator Setup ---"
+export REGISTRY_PASS=$(gum input --password --prompt "Create Harbor Admin Password (Must contain upper, lower, number): " --placeholder "Harbor12345!")
+
 echo "export NKP_VERSION=\"${NKP_VERSION}\"" > .nkp_version.env
 echo "export BUNDLE_ARCHIVE=\"${BUNDLE_ARCHIVE}\"" >> .nkp_version.env
+{
+    echo "export REGISTRY_URL=\"${REGISTRY_URL}\""
+    echo "export REGISTRY_USER=\"${REGISTRY_USER}\""
+    echo "export REGISTRY_PASS=\"${REGISTRY_PASS}\""
+    echo "export REGISTRY_CA=\"${REGISTRY_CERTS_DIR}/domain.crt\""
+} > .nkp_registry.env
 
 # ==============================================================================
 # STEP 2: SYSTEM INSTALLATION & PREPARATION
@@ -186,7 +190,7 @@ gum style --foreground 212 -- "--- Beginning System Configuration ---"
 
 # Install Docker and core dependencies if in internet mode
 if [ "${INSTALL_MODE}" == "internet" ]; then
-    gum style --foreground 240 "Installing OS Prerequisites (Kubectl, Docker, Networking Tools)..."
+    gum style --foreground 240 "Installing OS Prerequisites (Kubectl, Docker, Docker-Compose, Tools)..."
     if [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
         sudo yum install -y -q yum-utils bzip2 wget curl openssl tar socat conntrack
         cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo > /dev/null
@@ -199,7 +203,7 @@ gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
 EOF
         sudo yum install -y -q kubectl
         sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo > /dev/null
-        sudo yum install -y -q docker-ce docker-ce-cli containerd.io
+        sudo yum install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
     elif [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
         sudo apt-get update -y -qq && sudo apt-get install -y -qq apt-transport-https ca-certificates curl wget bzip2 software-properties-common openssl tar socat conntrack
         sudo install -m 0755 -d /etc/apt/keyrings
@@ -209,7 +213,7 @@ EOF
         sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
         sudo chmod a+r /etc/apt/keyrings/docker.asc
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        sudo apt-get update -y -qq && sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io
+        sudo apt-get update -y -qq && sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
     fi
 fi
 
@@ -236,7 +240,7 @@ if [ ! -f "$HOME/.ssh/id_rsa" ]; then
     ssh-keygen -t rsa -b 4096 -f "$HOME/.ssh/id_rsa" -N "" > /dev/null 2>&1
 fi
 
-gum style --foreground 240 "Configuring Local Registry and Firewalls..."
+gum style --foreground 240 "Configuring Firewalls..."
 if command -v ufw &> /dev/null; then
     sudo ufw allow ${REGISTRY_PORT}/tcp > /dev/null 2>&1 || true
 elif command -v firewall-cmd &> /dev/null; then
@@ -244,8 +248,11 @@ elif command -v firewall-cmd &> /dev/null; then
     sudo firewall-cmd --reload > /dev/null 2>&1 || true
 fi
 
-# Generate certificates
-sudo mkdir -p "${REGISTRY_DIR}" "${REGISTRY_CERTS_DIR}"
+# ==============================================================================
+# STEP 3: HARBOR SSL & INSTALLATION
+# ==============================================================================
+gum style --foreground 240 "Generating Self-Signed SSL Certificates for Harbor (${REGISTRY_IP})..."
+sudo mkdir -p "${REGISTRY_CERTS_DIR}"
 sudo openssl req -newkey rsa:4096 -nodes -sha256 -keyout "${REGISTRY_CERTS_DIR}/domain.key" \
   -addext "subjectAltName = DNS:localhost, IP:${REGISTRY_IP}, IP:127.0.0.1" \
   -x509 -days 365 -out "${REGISTRY_CERTS_DIR}/domain.crt" \
@@ -260,23 +267,40 @@ elif [ -d "/usr/local/share/ca-certificates/" ]; then
 fi
 sudo systemctl restart docker
 
-# Load registry image if Dark Site, then run container
-if [ "${INSTALL_MODE}" == "dark" ]; then
-    gum style --foreground 240 "Loading offline Docker Registry image..."
-    sudo docker load -i nkp-prereqs-bundle/images/registry-2.tar > /dev/null 2>&1
+# Install Harbor using the Offline Installer
+if [ ! -d "harbor" ]; then
+    gum style --foreground 240 "Extracting Harbor Offline Installer ${HARBOR_VERSION}..."
+    if [ "${INSTALL_MODE}" == "dark" ]; then
+        if [ ! -f "nkp-prereqs-bundle/harbor/harbor-offline-installer-${HARBOR_VERSION}.tgz" ]; then
+            gum style --foreground 196 "❌ ERROR: Dark Site mode detected, but offline Harbor installer is missing."
+            exit 1
+        fi
+        cp "nkp-prereqs-bundle/harbor/harbor-offline-installer-${HARBOR_VERSION}.tgz" .
+    elif [ "${INSTALL_MODE}" == "internet" ]; then
+        if [ ! -f "harbor-offline-installer-${HARBOR_VERSION}.tgz" ]; then
+            wget -q --show-progress "https://github.com/goharbor/harbor/releases/download/${HARBOR_VERSION}/harbor-offline-installer-${HARBOR_VERSION}.tgz"
+        fi
+    fi
+    tar xzf harbor-offline-installer-${HARBOR_VERSION}.tgz
 fi
 
-if [ ! "$(sudo docker ps -q -f name=registry)" ]; then
-    if [ "$(sudo docker ps -aq -f status=exited -f name=registry)" ]; then sudo docker rm registry > /dev/null 2>&1; fi
-    if ! gum spin --spinner line --title "Starting Docker Registry..." -- bash -c "sudo docker run -d --restart=always --name registry -v \"${REGISTRY_CERTS_DIR}:/certs\" -e REGISTRY_HTTP_ADDR=0.0.0.0:${REGISTRY_PORT} -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/domain.crt -e REGISTRY_HTTP_TLS_KEY=/certs/domain.key -v \"${REGISTRY_DIR}:/var/lib/registry\" -p ${REGISTRY_PORT}:${REGISTRY_PORT} registry:2 > /dev/null 2>&1"; then
-        gum style --foreground 196 "❌ ERROR: Failed to start local Docker registry."
-        exit 1
-    fi
-fi
-gum style --foreground 82 "✔ Registry running at: ${REGISTRY_URL}"
+gum style --foreground 240 "Configuring Harbor profile..."
+cd harbor
+cp harbor.yml.tmpl harbor.yml
+sed -i "s/^hostname: .*/hostname: ${REGISTRY_IP}/" harbor.yml
+sed -i "s/port: 80/port: 8080/" harbor.yml 
+sed -i "s/port: 443/port: ${REGISTRY_PORT}/" harbor.yml 
+sed -i "s|^  certificate: .*|  certificate: ${REGISTRY_CERTS_DIR}/domain.crt|" harbor.yml
+sed -i "s|^  private_key: .*|  private_key: ${REGISTRY_CERTS_DIR}/domain.key|" harbor.yml
+sed -i "s/^harbor_admin_password: .*/harbor_admin_password: ${REGISTRY_PASS}/" harbor.yml
+
+gum spin --spinner line --title "Installing Harbor Registry..." -- sudo ./install.sh > /dev/null
+cd ..
+
+gum style --foreground 82 "✔ Harbor is Live! UI Available at: https://${REGISTRY_URL}"
 
 # ==============================================================================
-# STEP 3: BUNDLE DOWNLOAD & EXTRACTION 
+# STEP 4: BUNDLE DOWNLOAD & EXTRACTION 
 # ==============================================================================
 if [ "${DOWNLOAD_BUNDLE}" == "true" ]; then
     gum style --foreground 212 "Downloading NKP Air-Gapped Bundle (~12GB). This may take a while..."
@@ -300,7 +324,6 @@ else
     gum style --foreground 82 "✔ Bundle already extracted."
 fi
 
-# Cleanup
 if [ "${INSTALL_MODE}" == "dark" ]; then
     sudo rm -rf nkp-prereqs-bundle
 fi

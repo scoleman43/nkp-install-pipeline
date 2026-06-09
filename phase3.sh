@@ -3,6 +3,7 @@
 # Script: 03_deploy_cluster.sh
 # Purpose: Gathers cluster sizing/networking details via UI and uses native 
 #          NKP automation to seamlessly deploy the air-gapped cluster.
+#          (Updated for Secure Harbor Integration)
 # ==============================================================================
 
 set -euo pipefail
@@ -12,12 +13,15 @@ set -euo pipefail
 # ==============================================================================
 gum style --foreground 212 -- "--- Checking Prerequisites ---"
 
-if [ -f ".nkp_version.env" ] && [ -f ".nkp_image.env" ]; then
+# FIX: Added .nkp_registry.env to the check to pull Harbor credentials
+if [ -f ".nkp_version.env" ] && [ -f ".nkp_image.env" ] && [ -f ".nkp_registry.env" ]; then
     source .nkp_version.env
     source .nkp_image.env
+    source .nkp_registry.env
     export PATH="$PWD/nkp-${NKP_VERSION}/cli:$PATH"
     gum style --foreground 82 "✔ Found NKP Version: ${NKP_VERSION}"
     gum style --foreground 82 "✔ Found Target Image: ${IMAGE_NAME}"
+    gum style --foreground 82 "✔ Found Harbor Registry: ${REGISTRY_URL}"
 else
     gum style --foreground 196 "❌ ERROR: Missing environment files. Please ensure Phase 1 and Phase 2 completed successfully."
     exit 1
@@ -30,10 +34,6 @@ fi
 
 # --- Default Variables ---
 export CLUSTER_NAME="nkp-prod-01"
-REGISTRY_IP=$(hostname -I | awk '{print $1}')
-export REGISTRY_IP
-export REGISTRY_URL="${REGISTRY_IP}:5000" 
-export REGISTRY_CA="/opt/registry/certs/domain.crt" 
 export PC_ENDPOINT="192.168.43.43" 
 export NUTANIX_USER="admin"
 export NUTANIX_PASSWORD=""
@@ -48,6 +48,9 @@ export WORKER_REPLICAS="3"
 # ==============================================================================
 # STEP 1: LOAD CACHE & INTERACTIVE CONFIGURATION
 # ==============================================================================
+# FIX: Nuke the old cluster handoff file immediately so Phase 4 can't read ghost data
+rm -f .nkp_cluster.env
+
 CACHE_FILE=".nkp_phase3_cache.env"
 if [ -f "$CACHE_FILE" ]; then
     gum style --foreground 240 "Loading previous configuration cache..."
@@ -126,8 +129,7 @@ if [ "$CONFIRM" == "No, Cancel" ]; then
     exit 0
 fi
 
-# FIX: Refresh the environment file right here, immediately after confirmation!
-# Even if the deployment fails later, Phase 4 will always have the correct target info.
+# Refresh the environment file right here, immediately after confirmation!
 echo "export CLUSTER_NAME=\"${CLUSTER_NAME}\"" > .nkp_cluster.env
 
 # Export credentials for the NKP CLI to consume natively
@@ -140,7 +142,8 @@ echo "Cleaning up any stale Docker containers..."
 nkp delete bootstrap --kubeconfig "$HOME/.kube/config" 2>/dev/null || true
 docker rm -f nkp-bootstrap-control-plane 2>/dev/null || true
 
-gum spin --spinner line --title "Pushing NKP bundles to local registry (${REGISTRY_URL})..." -- bash -c "nkp push bundle --bundle \"nkp-${NKP_VERSION}/container-images/konvoy-image-bundle-${NKP_VERSION}.tar\" --to-registry=\"${REGISTRY_URL}\" --to-registry-ca-cert-file=\"${REGISTRY_CA}\" && nkp push bundle --bundle \"nkp-${NKP_VERSION}/container-images/kommander-image-bundle-${NKP_VERSION}.tar\" --to-registry=\"${REGISTRY_URL}\" --to-registry-ca-cert-file=\"${REGISTRY_CA}\""
+# FIX: Added Harbor Username and Password flags to the bundle push commands
+gum spin --spinner line --title "Pushing NKP bundles to Harbor registry (${REGISTRY_URL})..." -- bash -c "nkp push bundle --bundle \"nkp-${NKP_VERSION}/container-images/konvoy-image-bundle-${NKP_VERSION}.tar\" --to-registry=\"${REGISTRY_URL}\" --to-registry-username=\"${REGISTRY_USER}\" --to-registry-password=\"${REGISTRY_PASS}\" --to-registry-ca-cert-file=\"${REGISTRY_CA}\" && nkp push bundle --bundle \"nkp-${NKP_VERSION}/container-images/kommander-image-bundle-${NKP_VERSION}.tar\" --to-registry=\"${REGISTRY_URL}\" --to-registry-username=\"${REGISTRY_USER}\" --to-registry-password=\"${REGISTRY_PASS}\" --to-registry-ca-cert-file=\"${REGISTRY_CA}\""
 
 gum spin --spinner line --title "Loading bootstrap image into local docker..." -- docker load -i "nkp-${NKP_VERSION}/konvoy-bootstrap-image-${NKP_VERSION}.tar" > /dev/null
 
@@ -150,6 +153,7 @@ gum spin --spinner line --title "Loading bootstrap image into local docker..." -
 gum style --foreground 240 "Starting Native Cluster API Deployment (Streaming logs below)..."
 echo "------------------------------------------------------------------------------"
 
+# FIX: Added --registry-mirror-username and --registry-mirror-password flags
 if ! nkp create cluster nutanix --cluster-name="${CLUSTER_NAME}" \
   --control-plane-prism-element-cluster="${PE_CLUSTER}" --worker-prism-element-cluster="${PE_CLUSTER}" \
   --control-plane-subnets="${SUBNET}" --worker-subnets="${SUBNET}" \
@@ -162,6 +166,8 @@ if ! nkp create cluster nutanix --cluster-name="${CLUSTER_NAME}" \
   --worker-vm-image="${IMAGE_NAME}" \
   --kubernetes-service-load-balancer-ip-range="${METALLB_IP_RANGE}" \
   --registry-mirror-url="https://${REGISTRY_URL}" \
+  --registry-mirror-username="${REGISTRY_USER}" \
+  --registry-mirror-password="${REGISTRY_PASS}" \
   --registry-mirror-cacert="${REGISTRY_CA}" \
   --ssh-public-key-file="$HOME/.ssh/id_rsa.pub" \
   --airgapped --self-managed --insecure; then
@@ -193,4 +199,3 @@ export KUBECONFIG="$PWD/${CLUSTER_NAME}.conf"
 gum style --foreground 212 "Checking new cluster nodes:"
 kubectl get nodes
 echo ""
-gum style --foreground 82 "You can now run Phase 4 to install the Management Plane & Harbor!"
