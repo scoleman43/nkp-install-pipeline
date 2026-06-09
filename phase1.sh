@@ -159,7 +159,8 @@ else
     export BUNDLE_ARCHIVE
     
     if [ -z "${BUNDLE_ARCHIVE}" ] || [ ! -f "${BUNDLE_ARCHIVE}" ]; then
-        gum style --foreground 196 "❌ ERROR: No bundle found. Please place the .tar.gz file here and retry."
+        gum style --foreground 196 "❌ ERROR: Missing Nutanix NKP Software Bundle!"
+        gum style --foreground 226 "Please download the official 'nkp-air-gapped-bundle_vX.X.X_linux_amd64.tar.gz' from the Nutanix Portal and place it in this directory alongside your prereqs bundle."
         exit 1
     fi
     
