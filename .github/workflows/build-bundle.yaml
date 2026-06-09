@@ -24,7 +24,7 @@ jobs:
       - name: Make script executable and run it
         run: |
           chmod +x build_prereqs.sh
-          ./build_prereqs.sh
+          ./build-prereqs.sh
 
       - name: Publish to GitHub Releases
         env:
