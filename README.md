@@ -23,7 +23,7 @@ The pipeline breaks the NKP lifecycle down into a streamlined, sequential workfl
 
 | Phase | Script | Purpose |
 | :--- | :--- | :--- |
-| **0** | `GitHub Actions` | **Prerequisites Builder:** Runs on cloud runners to download offline binaries and safe OS packages, compiling them into a `tar.gz`. *(Only required for physical media transfers).* |
+| **0** | `GitHub Actions` | **Prerequisites Builder:** Runs on cloud runners to download offline binaries and safe OS packages, compiling them into a `tar.gz`which can be downloaded from the Releases section. *(Only required for physical media transfers).* |
 | **1** | `phase1.sh` | **Bastion & Harbor Registry:** Configures local Docker runtimes, generates SSL keys, and spins up your isolated local Harbor registry. |
 | **2** | `phase2.sh` | **OS Image Staging:** Connects to Nutanix Prism Central to stage the base QCOW2 image for the Kubernetes nodes. |
 | **3** | `phase3.sh` | **Cluster Deployment:** Pushes 12GB+ of Nutanix container images into Harbor, bootstraps the isolated cluster via CAPI, and outputs UI dashboard credentials. |
