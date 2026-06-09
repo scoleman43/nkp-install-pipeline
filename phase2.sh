@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script: 02_build_node_image.sh
+# Script: phase2.sh
 # Purpose: Interactively gather infrastructure details, build a custom 
 #          Nutanix OS image using NKP 2.17+ syntax, or use a pre-built one.
 # ==============================================================================

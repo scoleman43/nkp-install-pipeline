@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script: 03_deploy_cluster.sh
+# Script: phase3.sh
 # Purpose: Gathers cluster sizing/networking details via UI and uses native 
 #          NKP automation to seamlessly deploy the air-gapped cluster.
 #          (Updated for Secure Harbor Integration & Dashboard Output)
@@ -36,7 +36,7 @@ fi
 
 # --- Default Variables ---
 export CLUSTER_NAME="nkp-prod-01"
-export PC_ENDPOINT="192.168.43.43" 
+export PC_ENDPOINT="10.0.0.43" 
 export NUTANIX_USER="admin"
 export NUTANIX_PASSWORD=""
 export PE_CLUSTER="PE_Cluster_Name"
@@ -218,6 +218,6 @@ gum style --border normal --margin "1" --padding "1 2" --border-foreground 82 "ð
 
 export KUBECONFIG="$PWD/${CLUSTER_NAME}.conf"
 
-gum style --foreground 212 "--- Kommander Dashboard Details ---"
+gum style --foreground 212 -- "--- Kommander Dashboard Details ---"
 nkp get dashboard --kubeconfig="${KUBECONFIG}"
 echo ""

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script: 01_setup_bastion_registry.sh
+# Script: phase1.sh
 # Purpose: Prepares Bastion Host, configures Proxy OR Offline Bundle, automates 
 #          'gum' UI, generates SSH keys, and installs Enterprise Harbor Registry.
 # ==============================================================================
