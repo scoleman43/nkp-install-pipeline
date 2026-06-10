@@ -58,7 +58,7 @@ To execute the air-gapped installation script, you will first need to provision 
 Ensure your bastion VM meets the following minimum requirements:
 * **vCPUs:** 2
 * **Memory (RAM):** 12 GB
-* **Storage:** 100 GB minimum *(Note: When creating the disk from the source image, you must explicitly expand the size from 3.5GB to at least 100GB. I would go larger if you intended to deploy NAI air-gapped to accommodate the NAI bundles and container images).*
+* **Storage:** 100 GB minimum *(Note: When creating the disk from the source image, you must explicitly expand the size from 3.5GB to at least 100GB. I would set it to 200GB if you intended to deploy NAI air-gapped to accommodate the NAI bundles and container images).*
 
 ### Source Image
 You can use the official Ubuntu Resolute cloud image. Download or provide the following URL to your cluster:
