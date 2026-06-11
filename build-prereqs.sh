@@ -42,7 +42,8 @@ if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
     sudo apt-get update -y -qq
     
     cd "${BUNDLE_DIR}/packages"
-    sudo apt-get download docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack || true
+    # Added skopeo and containers-common (required for skopeo policies on Ubuntu)
+    sudo apt-get download docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack skopeo containers-common || true
     cd ../..
 
 elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
@@ -50,7 +51,8 @@ elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
     sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo > /dev/null
     
     cd "${BUNDLE_DIR}/packages"
-    sudo yumdownloader --resolve --quiet --destdir=. docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack
+    # Added skopeo (yumdownloader --resolve handles dependencies natively)
+    sudo yumdownloader --resolve --quiet --destdir=. docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack skopeo
     cd ../..
 fi
 
