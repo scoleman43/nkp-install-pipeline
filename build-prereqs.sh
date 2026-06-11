@@ -11,15 +11,21 @@ mkdir -p "${BUNDLE_DIR}/packages" "${BUNDLE_DIR}/binaries" "${BUNDLE_DIR}/harbor
 
 if [ -f /etc/os-release ]; then . /etc/os-release; OS=$ID; else echo "Unsupported OS."; exit 1; fi
 
-echo "=== 1. Downloading Binaries (kubectl & gum) ==="
+echo "=== 1. Downloading Binaries (kubectl, gum, & helm) ==="
 # Download kubectl
 curl -sSL -o "${BUNDLE_DIR}/binaries/kubectl" "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
 chmod +x "${BUNDLE_DIR}/binaries/kubectl"
 
-# Download Gum UI standalone binary (Fixed for root-level extraction)
+# Download Gum UI standalone binary
 GUM_VERSION="0.13.0"
 curl -sSL "https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}/gum_${GUM_VERSION}_Linux_x86_64.tar.gz" | tar -xz -C "${BUNDLE_DIR}/binaries/" gum
 chmod +x "${BUNDLE_DIR}/binaries/gum"
+
+# Download Helm standalone binary
+HELM_VERSION="v3.15.1"
+echo "Downloading Helm ${HELM_VERSION}..."
+curl -sSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" | tar -xz -C "${BUNDLE_DIR}/binaries/" --strip-components=1 linux-amd64/helm
+chmod +x "${BUNDLE_DIR}/binaries/helm"
 
 echo "=== 2. Downloading Enterprise Harbor (Offline Installer) ==="
 HARBOR_VERSION="v2.10.3"
