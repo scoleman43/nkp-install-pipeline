@@ -3,18 +3,16 @@
 # Script: phase1.sh
 # Purpose: Prepares Bastion Host, configures Proxy OR Offline Bundle, automates 
 #          'gum' UI, generates SSH keys, and installs Enterprise Harbor Registry.
+# Architecture: Smart & Idempotent. Instantly skips re-installation if run again.
 # ==============================================================================
 
 set -euo pipefail
 
-# FIX: Force 256-color support for standalone 'gum' binary in PuTTY/Web Consoles
 export TERM="xterm-256color"
-
 export REGISTRY_PORT="5000"
 export REGISTRY_CERTS_DIR="/opt/registry/certs"
 export HARBOR_VERSION="v2.10.3"
 
-# SC2155 Fix: Declare and assign separately
 REGISTRY_IP=$(hostname -I | awk '{print $1}')
 export REGISTRY_IP
 export REGISTRY_URL="${REGISTRY_IP}:${REGISTRY_PORT}"
@@ -26,9 +24,23 @@ echo "Please authenticate sudo so we can configure the system uninterrupted:"
 sudo -v
 
 # ==============================================================================
-# STEP 0: INSTALLATION MODE (Standard Bash)
+# STEP 0: SMART RERUN / IDEMPOTENCY CHECK
 # ==============================================================================
-if [ -z "${INSTALL_MODE:-}" ]; then
+# If gum and kubectl are already installed, we completely skip the extraction 
+# and package install loop, saving time on a rerun.
+if command -v gum &> /dev/null && command -v kubectl &> /dev/null; then
+    echo "✔ Prerequisites already installed on this Bastion. Booting UI mode instantly..."
+    export INSTALL_MODE="dark"  # Default to dark for the UI reload path if offline
+    if [ ! -f ".nkp_registry.env" ]; then
+        # If cache doesn't exist yet, we still need to establish basic mode detection
+        if [ ! -f "nkp-prereqs-bundle.tar.gz" ]; then export INSTALL_MODE="internet"; fi
+    else
+        exec bash "$0" --triggered-by-reload
+        exit 0
+    fi
+fi
+
+if [ -z "${INSTALL_MODE:-}" ] && [ "${1:-}" != "--triggered-by-reload" ]; then
     echo "--- Select Bastion Installation Mode ---"
     echo "1) Internet-Based (Direct or via Corporate Proxy)"
     echo "2) Dark Site / Air-Gapped (Requires 'nkp-prereqs-bundle.tar.gz')"
@@ -120,12 +132,15 @@ gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
         echo "Dependencies installed successfully. Reloading script into UI mode..."
         sleep 1.5
         clear
-        exec bash "$0" "$@"
+        exec bash "$0" --triggered-by-reload
     else
         echo "ERROR: Failed to initialize 'gum' UI."
         exit 1
     fi
 fi
+
+# Determine install mode state if reloaded directly
+if [ -f "nkp-prereqs-bundle.tar.gz" ]; then export INSTALL_MODE="dark"; else export INSTALL_MODE="internet"; fi
 
 # ==============================================================================
 # STEP 1: INTERACTIVE CONFIGURATION (Powered by Gum)
@@ -327,8 +342,6 @@ if [ ! -d "nkp-${NKP_VERSION}" ]; then
 else
     gum style --foreground 82 "✔ Bundle already extracted."
 fi
-
-# NOTE: The removal of 'nkp-prereqs-bundle' has been entirely omitted to preserve Skopeo dependencies.
 
 # FIX: Persist 256-color terminal setting for Phase 2 & Phase 3
 if ! grep -q "export TERM=xterm-256color" "$HOME/.bashrc"; then
