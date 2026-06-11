@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script: build_prereqs.sh
+# Script: build-prereqs.sh
 # Purpose: Downloads all offline dependencies for a true Dark Site NKP Bastion.
 #          Hardened for headless CI/CD runners (like GitHub Actions).
 # ==============================================================================
