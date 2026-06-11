@@ -6,7 +6,6 @@
 # ==============================================================================
 set -euo pipefail
 
-# Force apt to run without popping up UI dialogs that freeze pipelines
 export DEBIAN_FRONTEND=noninteractive
 
 BUNDLE_DIR="nkp-prereqs-bundle"
@@ -46,10 +45,14 @@ if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
     cd "${BUNDLE_DIR}/packages"
     PACKAGES="docker-ce docker-ce-cli containerd.io docker-compose-plugin socat conntrack skopeo containers-common"
     
-    echo "Resolving and downloading all Ubuntu dependencies (this may take a minute)..."
+    echo "Resolving and downloading all Ubuntu dependencies (safely filtering core OS libraries)..."
     for pkg in $PACKAGES; do
-        DEPS=$(apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances "$pkg" 2>/dev/null | grep "^\w" | sort -u || echo "$pkg")
-        # Use xargs to pass the dependency list cleanly to apt-get download
+        # SAFETY FILTER: grep -v explicitly prevents downloading core system components that cause GLIBC mismatches
+        DEPS=$(apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances "$pkg" 2>/dev/null \
+            | grep "^\w" \
+            | grep -vE '^(libc6|libgcc-s1|libstdc\+\+6|base-files|base-passwd|coreutils|dpkg|findutils|grep|sed|gzip|perl-base|tar|util-linux|sysvinit-utils|init-system-helpers)' \
+            | sort -u || echo "$pkg")
+            
         echo "$DEPS" | xargs -r sudo apt-get download -y -qq 2>/dev/null || true
     done
     cd ../..
