@@ -73,7 +73,7 @@ To ensure you have immediate access to the VM, use the following `cloud-init` sc
 password: password1
 chpasswd: { expire: False }
 ssh_pwauth: True
-
+```
 ### Step 1: Stage the Bastion
 Transfer the installation scripts to the home directory of your Bastion host and make them executable:
 
