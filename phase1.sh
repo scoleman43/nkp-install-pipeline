@@ -3,16 +3,19 @@
 # Script: phase1.sh
 # Purpose: Prepares Bastion Host, configures Proxy OR Offline Bundle, automates 
 #          'gum' UI, generates SSH keys, and installs Enterprise Harbor Registry.
-# Architecture: Smart & Idempotent. Instantly skips re-installation if run again.
+# Architecture: Smart, Idempotent, and Pristine. Clears scrollback on reruns.
 # ==============================================================================
 
 set -euo pipefail
 
+# FIX: Force 256-color support for standalone 'gum' binary in PuTTY/Web Consoles
 export TERM="xterm-256color"
+
 export REGISTRY_PORT="5000"
 export REGISTRY_CERTS_DIR="/opt/registry/certs"
 export HARBOR_VERSION="v2.10.3"
 
+# SC2155 Fix: Declare and assign separately
 REGISTRY_IP=$(hostname -I | awk '{print $1}')
 export REGISTRY_IP
 export REGISTRY_URL="${REGISTRY_IP}:${REGISTRY_PORT}"
@@ -20,24 +23,27 @@ export REGISTRY_URL="${REGISTRY_IP}:${REGISTRY_PORT}"
 # shellcheck disable=SC1091
 if [ -f /etc/os-release ]; then . /etc/os-release; OS=$ID; else echo "Unsupported OS."; exit 1; fi
 
-echo "Please authenticate sudo so we can configure the system uninterrupted:"
-sudo -v
-
 # ==============================================================================
 # STEP 0: SMART RERUN / IDEMPOTENCY CHECK
 # ==============================================================================
-# If gum and kubectl are already installed, we completely skip the extraction 
-# and package install loop, saving time on a rerun.
+# If gum and kubectl are installed AND we haven't already reloaded, skip extraction.
 if command -v gum &> /dev/null && command -v kubectl &> /dev/null; then
-    echo "✔ Prerequisites already installed on this Bastion. Booting UI mode instantly..."
-    export INSTALL_MODE="dark"  # Default to dark for the UI reload path if offline
-    if [ ! -f ".nkp_registry.env" ]; then
-        # If cache doesn't exist yet, we still need to establish basic mode detection
+    if [ "${1:-}" != "--triggered-by-reload" ]; then
+        echo "✔ Prerequisites already installed on this Bastion. Booting UI mode instantly..."
+        export INSTALL_MODE="dark"
         if [ ! -f "nkp-prereqs-bundle.tar.gz" ]; then export INSTALL_MODE="internet"; fi
-    else
+        
+        # CLEAR SCREEN OPTIMIZATION: Wipes the terminal right before the UI reboot
+        clear
         exec bash "$0" --triggered-by-reload
         exit 0
     fi
+fi
+
+# Authenticate sudo ONLY if we are executing a fresh installation/extraction pass
+if [ "${1:-}" != "--triggered-by-reload" ]; then
+    echo "Please authenticate sudo so we can configure the system uninterrupted:"
+    sudo -v
 fi
 
 if [ -z "${INSTALL_MODE:-}" ] && [ "${1:-}" != "--triggered-by-reload" ]; then
@@ -139,7 +145,7 @@ gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo
     fi
 fi
 
-# Determine install mode state if reloaded directly
+# Fallback mode detection logic if loaded via standalone execution
 if [ -f "nkp-prereqs-bundle.tar.gz" ]; then export INSTALL_MODE="dark"; else export INSTALL_MODE="internet"; fi
 
 # ==============================================================================
