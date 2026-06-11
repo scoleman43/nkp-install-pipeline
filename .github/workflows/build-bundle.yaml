@@ -38,4 +38,4 @@ jobs:
           # Use the native GitHub CLI to create a release and attach the 800MB tarball
           gh release create "$TAG_NAME" nkp-prereqs-bundle.tar.gz \
             --title "NKP Prereqs Bundle - $(date +'%B %d, %Y')" \
-            --notes "Automated weekly build containing Harbor, kubectl, gum, and OS packages."
+            --notes "Automated build containing Harbor, kubectl, gum, Helm, Skopeo, and deep offline OS dependencies."
