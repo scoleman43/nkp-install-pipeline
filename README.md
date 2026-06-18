@@ -2,7 +2,7 @@
 
 An end-to-end automation pipeline for deploying **Nutanix Kubernetes Platform (NKP)** in air-gapped (dark site) environments. Both installation modes are fundamentally air-gapped — the NKP cluster and all Kubernetes node images are always sourced from the local Harbor registry, never from the internet. The Internet-Based mode is a hybrid that uses an outbound connection only to download prerequisite packages and tooling onto the bastion itself; once Phase 1 completes, all cluster operations are fully isolated.
 
-> **Deploying Nutanix Enterprise AI on top of NKP?** Once this pipeline completes, see the [NAI Installer](https://github.com/scoleman43/nai-install) to deploy NAI onto the cluster provisioned here.
+> **Deploying Nutanix Enterprise AI on top of NKP?** Once this pipeline completes, see the [NAI Installer](https://github.com/scoleman43/nai-install-pipeline) to deploy NAI onto the cluster provisioned here.
 
 ---
 
