@@ -78,7 +78,7 @@ The pipeline runs on a Linux VM inside your Nutanix environment. Provision it be
 | vCPUs | 2 | |
 | RAM | 12 GB | |
 | Disk | 100 GB | Set to **200 GB** if you plan to deploy NAI afterward — the NAI bundles and images require the extra space |
-| OS | Ubuntu 22.04 LTS | Ubuntu 26.04 LTS is also supported |
+| OS | Ubuntu 26.04 LTS | Ubuntu 22.04 LTS is also supported |
 
 ### Source Image
 
