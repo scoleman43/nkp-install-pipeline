@@ -1,8 +1,8 @@
 # 🚀 NKP Install Pipeline — Air-Gapped Infrastructure Engine
 
-An end-to-end automation pipeline for deploying **Nutanix Kubernetes Platform (NKP)** in strictly air-gapped (dark site) environments. Whether your bastion has a temporary internet connection or is completely offline, the resulting Kubernetes cluster and all node images are 100% isolated from the internet.
+An end-to-end automation pipeline for deploying **Nutanix Kubernetes Platform (NKP)** in air-gapped (dark site) environments. Both installation modes are fundamentally air-gapped — the NKP cluster and all Kubernetes node images are always sourced from the local Harbor registry, never from the internet. The Internet-Based mode is a hybrid that uses an outbound connection only to download prerequisite packages and tooling onto the bastion itself; once Phase 1 completes, all cluster operations are fully isolated.
 
-> **Deploying Nutanix Enterprise AI on top of NKP?** Once this pipeline completes, see the [NAI Installer](https://github.com/scoleman43/nai-install-pipeline) to deploy NAI onto the cluster provisioned here.
+> **Deploying Nutanix Enterprise AI on top of NKP?** Once this pipeline completes, see the [NAI Installer](https://github.com/scoleman43/nai-install) to deploy NAI onto the cluster provisioned here.
 
 ---
 
@@ -125,9 +125,9 @@ Phase 1 is idempotent — if it detects that `gum` and `kubectl` are already ins
 
 **What you'll be prompted for:**
 
-1. **Installation mode** — Dark Site (offline bundle) or Internet-Based (direct or via proxy)
-   - If Internet-Based and behind a corporate proxy, you will be asked for the proxy URL and NO_PROXY list
-   - If Internet-Based and you want to download the NKP bundle now, you will be asked for a presigned Nutanix URL
+1. **Installation mode** — Dark Site (fully offline) or Internet-Based (hybrid)
+   - **Dark Site:** all prerequisites come from the `nkp-prereqs-bundle.tar.gz`; no outbound access needed at any point
+   - **Internet-Based:** the bastion uses its internet connection to install OS packages and tooling only; you will be asked whether you want to download the NKP air-gapped bundle via a presigned Nutanix URL, and optionally prompted for a corporate proxy URL and NO_PROXY list — the NKP cluster install itself always uses the local Harbor registry regardless
 
 2. **NKP version** — e.g., `2.17.1`
 
@@ -262,9 +262,9 @@ The script will:
 
 ## Architecture Notes
 
-### Why Air-Gapped
+### Air-Gapped by Design
 
-The pipeline isolates the Kubernetes control plane, worker nodes, and all container workloads from the internet. The bastion may have a temporary connection during setup, but once Phase 1 completes, all cluster operations source from the local Harbor registry exclusively.
+Both installation modes produce a fully air-gapped cluster. The distinction between Dark Site and Internet-Based is limited to how the bastion acquires prerequisite tooling and the NKP bundle before the install begins. In Dark Site mode, everything arrives via physical media or a pre-staged bundle. In Internet-Based (hybrid) mode, the bastion uses a temporary internet connection to download OS packages and optionally the NKP bundle — but once Phase 1 completes and the bundle is staged in Harbor, all cluster operations source exclusively from the local registry. The Kubernetes control plane, worker nodes, and all container workloads never communicate with the internet.
 
 ### Harbor Registry Structure
 
