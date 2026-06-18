@@ -1,153 +1,316 @@
-# 🚀 NKP Install Pipeline (Air-Gapped Infrastructure Engine)
+# 🚀 NKP Install Pipeline — Air-Gapped Infrastructure Engine
 
-An end-to-end, highly resilient automation pipeline for deploying and managing the **Nutanix Kubernetes Platform (NKP)** inside strictly air-gapped (Dark Site) computing environments.
+An end-to-end automation pipeline for deploying **Nutanix Kubernetes Platform (NKP)** in strictly air-gapped (dark site) environments. Whether your bastion has a temporary internet connection or is completely offline, the resulting Kubernetes cluster and all node images are 100% isolated from the internet.
 
-> **⚠️ CRUCIAL ARCHITECTURE NOTE** > This pipeline is exclusively designed to provision air-gapped infrastructure. Whether the Bastion host operates completely offline (*Dark Site Mode*) or utilizes a transient internet connection to stream down binaries on-the-fly (*Internet Mode*), the target Nutanix environment, the node images, and the resulting Kubernetes cluster are **100% isolated and air-gapped**.
-
----
-
-## ✨ Key Features
-
-* **Strictly Air-Gapped Topology:** Regardless of the ingestion method, the final control plane and worker nodes rely entirely on local resources.
-* **Automated Staging Bundling:** Uses GitHub Actions to compile a weekly offline prerequisites bundle (`docker`, `kubectl`, `gum`, `harbor`) to bypass local OS dependency conflicts.
-* **Local Enterprise Harbor Registry:** Automatically deploys and configures a self-contained Harbor registry with auto-generated SSL certificates and an isolated `/nkp` project architecture.
-* **Interactive Terminal UI:** Built with `charmbracelet/gum` for a beautiful, error-resistant, menu-driven installation experience (with full 256-color support).
-* **Smart Credential Caching:** Caches Nutanix Prism Central credentials and network details between runs to survive network timeouts without forcing manual re-entry.
-* **Day 2 Operations Support:** Includes native upgrade scripts to seamlessly orchestrate zero-downtime cluster upgrades when new versions of NKP are released.
+> **Deploying Nutanix Enterprise AI on top of NKP?** Once this pipeline completes, see the [NAI Installer](https://github.com/scoleman43/nai-install) to deploy NAI onto the cluster provisioned here.
 
 ---
 
-## 🏗 Architecture Overview
+## Table of Contents
 
-The pipeline breaks the NKP lifecycle down into a streamlined, sequential workflow:
-
-| Phase | Script | Purpose |
-| :--- | :--- | :--- |
-| **0** | `GitHub Actions` | **Prerequisites Builder:** Runs on cloud runners to download offline binaries and safe OS packages, compiling them into a `tar.gz`which can be downloaded from the Releases section. *(Only required for physical media transfers).* |
-| **1** | `phase1.sh` | **Bastion & Harbor Registry:** Configures local Docker runtimes, generates SSL keys, and spins up your isolated local Harbor registry. |
-| **2** | `phase2.sh` | **OS Image Staging:** Connects to Nutanix Prism Central to stage the base QCOW2 image for the Kubernetes nodes. |
-| **3** | `phase3.sh` | **Cluster Deployment:** Pushes 12GB+ of Nutanix container images into Harbor, bootstraps the isolated cluster via CAPI, and outputs UI dashboard credentials. |
-| **Day 2** | `nkp-upgrade.sh` | **Cluster Upgrades:** Stablishes a clean path for pushing updated container bundles into Harbor and orchestrating a rolling cluster upgrade. |
-
----
-
-## 📋 Prerequisites
-
-Before running the pipeline, ensure your core infrastructure meets these requirements:
-
-### 1. Bastion Host
-* A clean Ubuntu Linux VM (e.g., **Ubuntu 22.04 LTS** or **26.04 LTS**).
-* Active SSH access.
-
-### 2. Nutanix Infrastructure Constraints
-* **Prism Central Sizing:** Prism Central **MUST** be deployed as size **Small** or larger. 
-  > 🛑 *Extra Small (X-Small) is strictly unsupported and will cause API deployment timeouts during the automated air-gapped CAPI orchestrations.*
-* Prism Central IP and Admin Credentials.
-* Target Prism Element Cluster Name.
-* Target Subnet/VLAN Name.
-* **1x VIP** (Virtual IP) for the isolated Kubernetes Control Plane.
-* A dedicated block of unused IPs for local application load-balancing (MetalLB).
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Bastion VM Setup](#bastion-vm-setup)
+- [Quick Start](#quick-start)
+  - [Phase 1 — Bastion & Harbor Registry](#phase-1--bastion--harbor-registry)
+  - [Phase 2 — Node OS Image](#phase-2--node-os-image)
+  - [Phase 3 — Cluster Deployment](#phase-3--cluster-deployment)
+- [Day 2 — Upgrading NKP](#day-2--upgrading-nkp)
+- [Architecture Notes](#architecture-notes)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## 🚀 Quick Start Guide: Initial Deployment
+## How It Works
 
-To execute the air-gapped installation script, you will first need to provision a Linux bastion VM within your Nutanix environment. We recommend using Ubuntu Server for this host. 
+The pipeline breaks deployment into three sequential phases, each building on the last. A GitHub Actions workflow (Phase 0) compiles an offline prerequisites bundle on cloud runners so nothing needs to be compiled on the bastion itself.
 
-### VM Specifications
-Ensure your bastion VM meets the following minimum requirements:
-* **vCPUs:** 2
-* **Memory (RAM):** 12 GB
-* **Storage:** 100 GB minimum *(Note: When creating the disk from the source image, you must explicitly expand the size from 3.5GB to at least 100GB. I would set it to 200GB if you intended to deploy NAI air-gapped to accommodate the NAI bundles and container images).*
+| Phase | Script | What It Does |
+|-------|--------|--------------|
+| **0** | GitHub Actions | Builds and publishes `nkp-prereqs-bundle.tar.gz` to the Releases page — contains `kubectl`, `gum`, Docker packages, and a Harbor offline installer. Only needed for physical media transfers. |
+| **1** | `phase1.sh` | Configures the bastion: installs Docker, `kubectl`, and `gum`; generates SSL certificates; and stands up a local Harbor registry. |
+| **2** | `phase2.sh` | Stages the Kubernetes node OS image in Nutanix Prism Central — either using a pre-built image or building a custom one with Packer. |
+| **3** | `phase3.sh` | Pushes ~12 GB of NKP container images into Harbor, bootstraps the air-gapped cluster via CAPI, and outputs Kommander dashboard credentials. |
+| **Day 2** | `nkp-upgrade.sh` | Ingests a new NKP bundle into Harbor and orchestrates a rolling cluster upgrade. |
+
+---
+
+## Prerequisites
+
+### Nutanix Infrastructure
+
+- **Prism Central** deployed at **Small** size or larger
+
+  > ⚠️ X-Small Prism Central is not supported — it causes API timeouts during the CAPI bootstrap sequence.
+
+- Prism Central IP/FQDN and admin credentials
+- Target Prism Element cluster name
+- AHV subnet name or UUID for Kubernetes node VMs
+- **1 unused VIP** for the Kubernetes control plane
+- A dedicated block of unused IPs for MetalLB (application load balancing)
+- A pre-uploaded QCOW2 node image in Prism Central *(or network access for a custom Packer build — see Phase 2)*
+
+### Bundle Files
+
+**For Dark Site / Air-Gapped installs**, transfer these files to the bastion before starting:
+
+```
+├── phase1.sh
+├── phase2.sh
+├── phase3.sh
+├── nkp-upgrade.sh
+├── nkp-air-gapped-bundle_v2.17.1_linux_amd64.tar.gz   ← From Nutanix Support Portal
+└── nkp-prereqs-bundle.tar.gz                           ← From GitHub Releases
+```
+
+**For Internet-Assisted installs**, only the scripts are needed. Phase 1 will prompt for a presigned Nutanix download URL and pull everything automatically.
+
+---
+
+## Bastion VM Setup
+
+The pipeline runs on a Linux VM inside your Nutanix environment. Provision it before running any scripts.
+
+### Recommended Specifications
+
+| Resource | Minimum | Notes |
+|----------|---------|-------|
+| vCPUs | 2 | |
+| RAM | 12 GB | |
+| Disk | 100 GB | Set to **200 GB** if you plan to deploy NAI afterward — the NAI bundles and images require the extra space |
+| OS | Ubuntu 22.04 LTS | Ubuntu 26.04 LTS is also supported |
 
 ### Source Image
-You can use the official Ubuntu Resolute cloud image. Download or provide the following URL to your cluster:
-> `https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img`
 
-### Cloud-Init Configuration
-To ensure you have immediate access to the VM, use the following `cloud-init` script during the VM creation process. This will configure the default `ubuntu` user with a set password, disable password expiration, and enable SSH password authentication.
+Use the official Ubuntu cloud image. Provide this URL in Prism Central's image upload or download it directly:
 
-**Custom Script (Cloud-Config):**
+```
+https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-amd64.img
+```
+
+> When creating the VM from this image, explicitly expand the disk from the default 3.5 GB to at least 100 GB (200 GB recommended for NAI).
+
+### Cloud-Init (Recommended)
+
+Add this cloud-config during VM creation to set a password and enable SSH password authentication for first access:
+
 ```yaml
 #cloud-config
 password: password1
 chpasswd: { expire: False }
 ssh_pwauth: True
 ```
-### Step 1: Stage the Bastion
-Transfer the installation scripts to the home directory of your Bastion host and make them executable:
+
+> Change the password immediately after first login, or replace this with your SSH public key for key-based auth.
+
+### Prepare the Scripts
+
+SSH into the bastion and make the scripts executable:
 
 ```bash
 chmod +x phase1.sh phase2.sh phase3.sh nkp-upgrade.sh
 ```
 
-**For True Dark Site Installs (Physical Media Transfer):**
-You must manually transfer both `.tar.gz` bundles into the same directory before starting. Your directory structure should look exactly like this:
-```text
-├── phase1.sh
-├── phase2.sh
-├── phase3.sh
-├── nkp-upgrade.sh
-├── nkp-air-gapped-bundle_v2.17.1_linux_amd64.tar.gz
-└── nkp-prereqs-bundle.tar.gz
-```
-The ```nkp-air-gapped-bundle_v2.17.1_linux_amd64.tar.gz``` can be downloaded from the Nutanix support portal.
-The ```nkp-prereqs-bundle.tar.gz``` can be downloaded from the GitHub Releases section on the main nkp-install-pipeline page.  
+---
 
-**For Internet-Assisted Bastion Installs:**
-You only need the scripts. The pipeline will automatically prompt you for a presigned Nutanix URL and leverage the Bastion's temporary connection to pull down the required installation bundles into the local staging environment.
+## Quick Start
 
-### Step 2: Run Phase 1 (Bastion & Registry Setup)
+### Phase 1 — Bastion & Harbor Registry
+
 ```bash
 ./phase1.sh
 ```
-1. Select **Dark Site** or **Internet-Based** ingestion mode.
-2. Follow the UI prompts to set your Harbor administrator password.
-3. **IMPORTANT:** Once complete, type `exit` to close your SSH session, then log back in to ensure your user is successfully added to the `docker` security group.
 
-### Step 3: Run Phase 2 (Image Staging)
+Phase 1 is idempotent — if it detects that `gum` and `kubectl` are already installed, it skips straight to the UI. Safe to re-run if anything goes wrong.
+
+**What you'll be prompted for:**
+
+1. **Installation mode** — Dark Site (offline bundle) or Internet-Based (direct or via proxy)
+   - If Internet-Based and behind a corporate proxy, you will be asked for the proxy URL and NO_PROXY list
+   - If Internet-Based and you want to download the NKP bundle now, you will be asked for a presigned Nutanix URL
+
+2. **NKP version** — e.g., `2.17.1`
+
+3. **Harbor admin password** — Must contain uppercase, lowercase, and a number (e.g., `Harbor12345!`)
+
+**What it does automatically:**
+
+- Installs Docker, `kubectl`, and supporting OS packages
+- Configures Docker proxy settings if applicable
+- Generates an SSH keypair at `~/.ssh/id_rsa` if one does not exist
+- Generates a self-signed SSL certificate for the Harbor registry and trusts it system-wide
+- Deploys Harbor v2.10.3 and configures it with your password and certificate
+- Extracts the NKP bundle and installs the `nkp` CLI to `/usr/local/bin/nkp`
+- Writes `.nkp_version.env` and `.nkp_registry.env` for use by Phase 2 and Phase 3
+
+**After Phase 1 completes:**
+
+> ⚠️ **You must log out and log back in before running Phase 2.** Phase 1 adds your user to the `docker` group; the change does not take effect until you start a new session.
+
+```bash
+exit
+# SSH back in, then:
+./phase2.sh
+```
+
+---
+
+### Phase 2 — Node OS Image
+
 ```bash
 ./phase2.sh
 ```
-1. Select **Use a Pre-Built Image** *(Highly recommended for air-gapped topologies to bypass the need for temporary builder VMs or local OS mirrors)*.
-2. Enter the exact, case-sensitive name of the NKP QCOW2 image as it appears in your Prism Central Image Configuration UI.
-3. You also have the option to build a **Custom Image** which will automate preparing and creating the OS of your choice as a image option in PC. 
 
-### Step 4: Run Phase 3 (Cluster Deployment)
+Phase 2 reads `.nkp_version.env` and `.nkp_registry.env` written by Phase 1. If those files are missing, it will exit with an error.
+
+**You will be asked to choose between two paths:**
+
+#### Option A — Use a Pre-Built Image *(Recommended for air-gapped environments)*
+
+Select this if you have already uploaded an NKP-compatible QCOW2 image to Prism Central. You will be prompted for the exact image name as it appears in Prism Central's Image Configuration UI (case-sensitive).
+
+The image name is saved to `.nkp_image.env` for Phase 3.
+
+#### Option B — Build a Custom Image
+
+Select this to build a node image from scratch using NKP's Packer-based image builder. You will be prompted for:
+
+- Target OS (`ubuntu-22.04`, `rocky-9.6`, or `rhel-8.10`)
+- Prism Central IP/FQDN and credentials
+- Prism Element cluster name
+- Subnet name or UUID
+- Base image name in Prism Central (the source QCOW2 for Packer to boot)
+
+> ⚠️ **Air-gap warning:** Custom image builds require the temporary Packer builder VM to download OS packages during the build. In a dark site, your base image must point to an internal APT/YUM mirror, or the build will time out. For most air-gapped deployments, Option A is the right choice.
+
+The build streams Packer output live and takes 10–15 minutes. Once complete, you will be prompted to paste the name of the newly created image from the end of the build log.
+
+---
+
+### Phase 3 — Cluster Deployment
+
 ```bash
 ./phase3.sh
 ```
-1. Enter your target Nutanix sizing, IP schemes, and Prism Central details.
-2. Confirm deployment. The script will dynamically read your cached parameters and securely authenticate your local Docker engine against Harbor.
-3. **Grab your Credentials:** Upon clean validation of the newly generated cluster config file, the script will print the active cluster URL, management username, and secure password to access your local Kommander dashboard.
+
+Phase 3 reads `.nkp_version.env`, `.nkp_image.env`, and `.nkp_registry.env`. It also requires `~/.ssh/id_rsa.pub` to exist — Phase 1 creates this automatically.
+
+**What you'll be prompted for:**
+
+| Prompt | Example |
+|--------|---------|
+| Cluster name | `nkp-prod-01` |
+| Control plane VIP (must be an unused IP) | `10.0.0.50` |
+| MetalLB IP range | `10.0.0.100-10.0.0.150` |
+| Number of control plane nodes (must be odd) | `3` |
+| Number of worker nodes | `3` |
+| Prism Central IP/FQDN | `10.0.0.43` |
+| Prism Central username | `admin` |
+| Prism Central password | *(cached after first entry)* |
+| Prism Element cluster name | `PE_Cluster_Name` |
+| Subnet UUID | `VLAN_UUID_Goes_Here` |
+| CSI storage container name | `Default_Container` |
+
+All values are cached to `.nkp_phase3_cache.env` and pre-filled on subsequent runs. Press **Enter** to accept a cached value or type a new one to override.
+
+**What it does automatically:**
+
+1. Removes any stale bootstrap containers from a previous failed run
+2. Logs the local Docker daemon into Harbor
+3. Creates the `/nkp` project in Harbor via the API (prevents 401 errors on push)
+4. Pushes the Konvoy core bundle (~12 GB) into Harbor
+5. Pushes the Kommander application bundle into Harbor
+6. Loads the bootstrap image into the local Docker daemon
+7. Runs `nkp create cluster nutanix` in `--airgapped --self-managed` mode, streaming live CAPI logs
+8. Validates the generated kubeconfig (`<cluster-name>.conf`)
+9. Prints the Kommander dashboard URL and credentials
+
+**After Phase 3 completes:**
+
+Your cluster kubeconfig is at `./<cluster-name>.conf`. Set it as your active context:
+
+```bash
+export KUBECONFIG="$PWD/nkp-prod-01.conf"
+kubectl get nodes
+```
+
+The Kommander dashboard URL and login credentials are printed at the end of the Phase 3 output. Save these.
 
 ---
 
-## 🔄 Day 2 Operations: Upgrading NKP
+## Day 2 — Upgrading NKP
 
-When a new version of Nutanix Kubernetes Platform is released, upgrading your air-gapped cluster is fully automated via the `nkp-upgrade.sh` script.
+When a new NKP version is released, use the upgrade script to update your air-gapped cluster without rebuilding from scratch.
 
-### Step 1: Stage the New Bundle
-Either transfer the new `.tar.gz` bundle to your Bastion directory manually, or have a presigned Nutanix URL ready.
+### Step 1 — Stage the New Bundle
 
-### Step 2: Execute the Upgrade
+Transfer the new `nkp-air-gapped-bundle_v<NEW_VERSION>_linux_amd64.tar.gz` to the bastion, or have a presigned download URL ready.
+
+### Step 2 — Run the Upgrade
+
 ```bash
 ./nkp-upgrade.sh
 ```
-1. The script will validate your existing `kubeconfig` and Harbor credentials.
-2. It will ask if you are utilizing a local tarball or a presigned download URL.
-3. The new 12GB bundle will be unpacked, the local Harbor `/nkp` project will ingest the updated core container blueprints, and the CAPI upgrade sequence will be initiated against your cluster automatically.
+
+The script will:
+1. Validate your existing kubeconfig and Harbor credentials
+2. Prompt you to choose between a local tarball or a presigned download URL
+3. Extract the new bundle and push updated container images into Harbor
+4. Initiate the rolling CAPI upgrade sequence against your cluster
 
 ---
 
-## 🛠 Troubleshooting & Detailed Technical Notes
+## Architecture Notes
 
-### 🔒 Harbor 401 Unauthorized Errors
-* **Symptom:** The image stream immediately errors out with `unexpected status code 401 Unauthorized` during the initial push steps.
-* **Root Cause:** Enterprise Harbor registries bar anonymous pushes to the root directory. If an image path is directed to the bare registry destination (`192.168.43.79:5000/calico/apiserver`), the infrastructure drops the connection.
-* **Resolution:** The pipeline handles this natively by utilizing a `curl` pre-check loop to force create a dedicated `/nkp` directory structure via the Harbor API, ensuring all container payloads explicitly route inside a valid project namespace.
+### Why Air-Gapped
 
-### 💥 Dangerous OS Dependency Crashes
-* **Symptom:** The script crashes during certificate validation with `Segmentation fault (core dumped)` and completely breaks other binary tools on the Bastion.
-* **Root Cause:** Core system automation tools (`openssl`, `tar`, `curl`) are tightly coupled to the host OS C-libraries (`glibc`). Blindly installing upstream `.deb` packages across modern architectures (like Ubuntu 26.04 LTS) overwrites system cryptography files, fracturing OS stability.
-* **Resolution:** The automated Step 0 GitHub Actions workflow has been specifically designed to exclude core system packages from the ingestion loop. It exclusively fetches infrastructure runtimes (`docker-ce`, `containerd.io`). This protects your Bastion's OS integrity by allowing your host's native `openssl` binary to safely generate certificates uninterrupted.
+The pipeline isolates the Kubernetes control plane, worker nodes, and all container workloads from the internet. The bastion may have a temporary connection during setup, but once Phase 1 completes, all cluster operations source from the local Harbor registry exclusively.
+
+### Harbor Registry Structure
+
+Harbor runs on the bastion at `https://<bastion-ip>:5000`. All NKP images are pushed into a dedicated `/nkp` project (`https://<bastion-ip>:5000/nkp/...`). This project is created automatically by Phase 3 via the Harbor API before the first image push, which prevents 401 Unauthorized errors that occur when pushing to a non-existent project.
+
+### Self-Signed SSL
+
+Phase 1 generates a 4096-bit RSA certificate scoped to the bastion's IP address and trusts it system-wide. This certificate is passed to the `nkp create cluster` command via `--registry-mirror-cacert` so that cluster nodes can authenticate to Harbor without additional configuration.
+
+### Smart Credential Caching
+
+Phase 2 and Phase 3 each maintain their own cache files (`.nkp_phase2_cache.env` and `.nkp_phase3_cache.env`). Both are created with `chmod 600` and exist only on the local bastion. They contain plaintext credentials — delete them when no longer needed or when handing off the bastion to another operator.
+
+### Idempotency
+
+Phase 1 detects existing installations and skips straight to the UI rather than re-installing packages. Phase 3 cleans up stale Docker bootstrap containers before starting so a failed previous run does not block a retry.
+
+---
+
+## Troubleshooting
+
+**Harbor returns 401 Unauthorized during image push**
+The `/nkp` project must exist before images can be pushed. Phase 3 creates it automatically via `curl` against the Harbor API. If you are pushing manually, create the project first through the Harbor web UI at `https://<bastion-ip>:5000` or via:
+```bash
+curl -sk -u "admin:<password>" -X POST "https://<bastion-ip>:5000/api/v2.0/projects" \
+  -H "Content-Type: application/json" \
+  -d '{"project_name": "nkp", "metadata": {"public": "true"}}'
+```
+
+**Phase 2 or Phase 3 cannot find environment files**
+Each phase depends on `.env` files written by the previous phase. If you see a missing file error, ensure the previous phase completed without errors. The files are: `.nkp_version.env` (Phase 1), `.nkp_registry.env` (Phase 1), `.nkp_image.env` (Phase 2).
+
+**Docker permission denied after Phase 1**
+You must log out and back in after Phase 1 for the `docker` group membership to take effect. Running `newgrp docker` in the current session also works as a temporary fix.
+
+**Custom image build times out (Phase 2)**
+The Packer builder VM needs to download OS packages during the build. In a dark site, your base image must be configured to use an internal package mirror. If no mirror is available, use a pre-built image (Option A in Phase 2) instead.
+
+**Segmentation fault during certificate generation**
+Occurs when upstream `.deb` packages overwrite system `glibc` libraries on newer Ubuntu versions (e.g., 26.04). The GitHub Actions prereqs bundle is specifically designed to exclude these packages — use the bundle from the Releases page rather than installing packages manually.
+
+**Phase 3 cluster deployment fails mid-way**
+The script removes stale bootstrap containers at the start of each run, so it is safe to re-run after fixing the underlying issue. Check the live CAPI log output above the error message for the specific failure reason (most commonly: incorrect PE cluster name, subnet UUID, or VIP already in use).
+
+**`~/.ssh/id_rsa.pub` not found**
+Phase 1 generates this keypair automatically. If you skipped Phase 1 or are on a different bastion, generate it manually:
+```bash
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+```
