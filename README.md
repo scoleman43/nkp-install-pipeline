@@ -107,6 +107,8 @@ ssh_pwauth: True
 
 SSH into the bastion and make the scripts executable:
 
+> 💡 **Recommended Tool — MobaXterm (Windows):** If you are connecting to the bastion from a Windows machine, [MobaXterm Home Edition](https://mobaxterm.mobatek.net/download-home-edition.html) is a free, all-in-one SSH client with a built-in SCP file browser. It lets you open an SSH terminal and drag-and-drop the NKP bundle files and scripts onto the bastion in the same window, without needing a separate SCP or SFTP tool.
+
 ```bash
 chmod +x phase1.sh phase2.sh phase3.sh nkp-upgrade.sh
 ```
