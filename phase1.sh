@@ -3,44 +3,38 @@
 # Script: phase1.sh
 # Purpose: Prepares Bastion Host, configures Proxy OR Offline Bundle, automates 
 #          'gum' UI, generates SSH keys, and installs Enterprise Harbor Registry.
-# Architecture: Smart, Idempotent, and Pristine. Clears scrollback on reruns.
+# Architecture: Connected Bootstrap Node or Pure Air-Gapped execution.
 # ==============================================================================
 
 set -euo pipefail
 
-# FIX: Force 256-color support for standalone 'gum' binary in PuTTY/Web Consoles
+# Force 256-color support for standalone 'gum' binary in PuTTY/Web Consoles
 export TERM="xterm-256color"
 
 export REGISTRY_PORT="5000"
 export REGISTRY_CERTS_DIR="/opt/registry/certs"
 export HARBOR_VERSION="v2.10.3"
 
-# SC2155 Fix: Declare and assign separately
 REGISTRY_IP=$(hostname -I | awk '{print $1}')
 export REGISTRY_IP
 export REGISTRY_URL="${REGISTRY_IP}:${REGISTRY_PORT}"
 
-# shellcheck disable=SC1091
 if [ -f /etc/os-release ]; then . /etc/os-release; OS=$ID; else echo "Unsupported OS."; exit 1; fi
+
+# Safely catch our mode if we are reloading into the UI
+if [ "${1:-}" == "--triggered-by-reload" ]; then
+    export INSTALL_MODE="${2:-internet}"
+fi
 
 # ==============================================================================
 # STEP 0: SMART RERUN / IDEMPOTENCY CHECK
 # ==============================================================================
-# If gum and kubectl are installed AND we haven't already reloaded, skip extraction.
 if command -v gum &> /dev/null && command -v kubectl &> /dev/null; then
     if [ "${1:-}" != "--triggered-by-reload" ]; then
-        echo "✔ Prerequisites already installed on this Bastion. Booting UI mode instantly..."
-        export INSTALL_MODE="dark"
-        if [ ! -f "nkp-prereqs-bundle.tar.gz" ]; then export INSTALL_MODE="internet"; fi
-        
-        # CLEAR SCREEN OPTIMIZATION: Wipes the terminal right before the UI reboot
-        clear
-        exec bash "$0" --triggered-by-reload
-        exit 0
+        echo "✔ Prerequisites already installed on this Bastion."
     fi
 fi
 
-# Authenticate sudo ONLY if we are executing a fresh installation/extraction pass
 if [ "${1:-}" != "--triggered-by-reload" ]; then
     echo "Please authenticate sudo so we can configure the system uninterrupted:"
     sudo -v
@@ -48,35 +42,14 @@ fi
 
 if [ -z "${INSTALL_MODE:-}" ] && [ "${1:-}" != "--triggered-by-reload" ]; then
     echo "--- Select Bastion Installation Mode ---"
-    echo "1) Internet-Based (Direct or via Corporate Proxy)"
-    echo "2) Dark Site / Air-Gapped (Requires 'nkp-prereqs-bundle.tar.gz')"
+    echo "1) Internet-Based (Will configure proxy, and download missing components)"
+    echo "2) Dark Site / Air-Gapped (Strictly offline, requires 'nkp-prereqs-bundle.tar.gz')"
     
     read -r -p "Select Mode (1 or 2): " MODE_SELECTION
     
     if [ "$MODE_SELECTION" == "2" ]; then
         export INSTALL_MODE="dark"
         export USE_PROXY="false"
-        
-        if [ ! -f "nkp-prereqs-bundle.tar.gz" ]; then
-            echo "❌ ERROR: 'nkp-prereqs-bundle.tar.gz' not found in current directory."
-            exit 1
-        fi
-        
-        echo "Extracting offline prerequisites bundle..."
-        tar -xzf nkp-prereqs-bundle.tar.gz
-        
-        echo "Installing offline binaries..."
-        sudo cp nkp-prereqs-bundle/binaries/kubectl /usr/local/bin/kubectl
-        sudo cp nkp-prereqs-bundle/binaries/gum /usr/local/bin/gum
-        
-        echo "Installing offline OS packages..."
-        if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
-            sudo dpkg -i nkp-prereqs-bundle/packages/*.deb || true
-            sudo apt-get install -f -y || true 
-        elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
-            sudo rpm -Uvh --force --nodeps nkp-prereqs-bundle/packages/*.rpm
-        fi
-
     elif [ "$MODE_SELECTION" == "1" ]; then
         export INSTALL_MODE="internet"
         
@@ -109,44 +82,64 @@ if [ -z "${INSTALL_MODE:-}" ] && [ "${1:-}" != "--triggered-by-reload" ]; then
                 grep -q "^proxy=" /etc/yum.conf || echo "proxy=${PROXY_URL}" | sudo tee -a /etc/yum.conf
             fi
         fi
+    else
+        echo "Invalid selection."
+        exit 1
+    fi
+
+    if [ -f "nkp-prereqs-bundle.tar.gz" ]; then
+        echo "✔ Local 'nkp-prereqs-bundle.tar.gz' detected! Utilizing local packages..."
+        echo "Extracting offline prerequisites bundle..."
+        tar -xzf nkp-prereqs-bundle.tar.gz
         
-        if ! command -v gum &> /dev/null; then
-            echo "--- Preparing the Installer UI ---"
-            if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
-                sudo apt-get update -y -qq && sudo apt-get install -y -qq curl gnupg
-                sudo mkdir -p /etc/apt/keyrings
-                curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg
-                echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list > /dev/null
-                sudo apt-get update -y -qq && sudo apt-get install -y -qq gum
-            elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
-                sudo yum install -y -q curl
-                echo '[charm]
+        echo "Installing offline binaries..."
+        sudo cp nkp-prereqs-bundle/binaries/kubectl /usr/local/bin/kubectl || true
+        sudo cp nkp-prereqs-bundle/binaries/gum /usr/local/bin/gum || true
+        
+        echo "Installing offline OS packages..."
+        if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
+            sudo dpkg -i nkp-prereqs-bundle/packages/*.deb || true
+            sudo apt-get install -f -y || true 
+        elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
+            sudo rpm -Uvh --force --nodeps nkp-prereqs-bundle/packages/*.rpm || true
+        fi
+    else
+        if [ "$INSTALL_MODE" == "dark" ]; then
+            echo "❌ ERROR: 'nkp-prereqs-bundle.tar.gz' not found, but Dark Site mode was selected."
+            exit 1
+        fi
+    fi
+    
+    if ! command -v gum &> /dev/null; then
+        echo "--- Downloading Installer UI (gum) ---"
+        if [[ "$OS" =~ ^(ubuntu|debian)$ ]]; then
+            sudo apt-get update -y -qq && sudo apt-get install -y -qq curl gnupg
+            sudo mkdir -p /etc/apt/keyrings
+            curl -fsSL https://repo.charm.sh/apt/gpg.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/charm.gpg
+            echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" | sudo tee /etc/apt/sources.list.d/charm.list > /dev/null
+            sudo apt-get update -y -qq && sudo apt-get install -y -qq gum
+        elif [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
+            sudo yum install -y -q curl
+            echo '[charm]
 name=Charm
 baseurl=https://repo.charm.sh/yum/
 enabled=1
 gpgcheck=1
 gpgkey=https://repo.charm.sh/yum/gpg.key' | sudo tee /etc/yum.repos.d/charm.repo > /dev/null
-                sudo yum install -y -q gum
-            fi
+            sudo yum install -y -q gum
         fi
-    else
-        echo "Invalid selection."
-        exit 1
     fi
     
     if command -v gum &> /dev/null; then
         echo "Dependencies installed successfully. Reloading script into UI mode..."
         sleep 1.5
         clear
-        exec bash "$0" --triggered-by-reload
+        exec bash "$0" --triggered-by-reload "${INSTALL_MODE}"
     else
         echo "ERROR: Failed to initialize 'gum' UI."
         exit 1
     fi
 fi
-
-# Fallback mode detection logic if loaded via standalone execution
-if [ -f "nkp-prereqs-bundle.tar.gz" ]; then export INSTALL_MODE="dark"; else export INSTALL_MODE="internet"; fi
 
 # ==============================================================================
 # STEP 1: INTERACTIVE CONFIGURATION (Powered by Gum)
@@ -155,10 +148,10 @@ gum style --border double --margin "1" --padding "1 2" --border-foreground 212 "
 
 if [ "${INSTALL_MODE}" == "dark" ]; then
     export DOWNLOAD_BUNDLE="false"
-    gum style --foreground 240 "Dark Site Mode Active: Skipping Internet Downloads."
+    gum style --foreground 240 "Dark Site Mode Active. Skipping Internet prompts for the main bundle."
 else
     gum style --foreground 99 -- "--- Air-Gapped Bundle Configuration ---"
-    DOWNLOAD_BUNDLE=$(gum choose --header "Do you want to automatically download the NKP air-gapped bundle?" "Yes" "No (I already uploaded it)")
+    DOWNLOAD_BUNDLE=$(gum choose --header "Do you want to automatically download the 12GB NKP air-gapped bundle?" "Yes" "No (I already uploaded it)")
 fi
 
 if [ "$DOWNLOAD_BUNDLE" == "Yes" ]; then
@@ -184,7 +177,7 @@ else
     
     if [ -z "${BUNDLE_ARCHIVE}" ] || [ ! -f "${BUNDLE_ARCHIVE}" ]; then
         gum style --foreground 196 "❌ ERROR: Missing Nutanix NKP Software Bundle!"
-        gum style --foreground 226 "Please download the official 'nkp-air-gapped-bundle_vX.X.X_linux_amd64.tar.gz' from the Nutanix Portal and place it in this directory alongside your prereqs bundle."
+        gum style --foreground 226 "Please download the official 'nkp-air-gapped-bundle_vX.X.X_linux_amd64.tar.gz' from the Nutanix Portal and place it in this directory."
         exit 1
     fi
     
@@ -213,9 +206,10 @@ echo "export BUNDLE_ARCHIVE=\"${BUNDLE_ARCHIVE}\"" >> .nkp_version.env
 # ==============================================================================
 gum style --foreground 212 -- "--- Beginning System Configuration ---"
 
-# Install Docker and core dependencies if in internet mode
-if [ "${INSTALL_MODE}" == "internet" ]; then
-    gum style --foreground 240 "Installing OS Prerequisites (Kubectl, Docker, Docker-Compose, Tools)..."
+if [ -d "nkp-prereqs-bundle" ] || [ -f "nkp-prereqs-bundle.tar.gz" ]; then
+    gum style --foreground 240 "OS Prerequisites (Kubectl, Docker) were pre-installed from the local bundle."
+elif [ "${INSTALL_MODE}" == "internet" ]; then
+    gum style --foreground 240 "Downloading OS Prerequisites via Internet (Kubectl, Docker, Docker-Compose, Tools)..."
     if [[ "$OS" =~ ^(rhel|centos|rocky)$ ]]; then
         sudo yum install -y -q yum-utils bzip2 wget curl openssl tar socat conntrack
         cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo > /dev/null
@@ -242,8 +236,7 @@ EOF
     fi
 fi
 
-# Start Docker and ensure permissions
-if [ "${INSTALL_MODE}" == "internet" ] && [ "${USE_PROXY}" == "true" ]; then
+if [ "${INSTALL_MODE}" == "internet" ] && [ "${USE_PROXY:-false}" == "true" ]; then
     sudo mkdir -p /etc/systemd/system/docker.service.d
     cat <<EOF | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf > /dev/null
 [Service]
@@ -274,14 +267,42 @@ elif command -v firewall-cmd &> /dev/null; then
 fi
 
 # ==============================================================================
-# STEP 3: HARBOR SSL & INSTALLATION
+# STEP 3: HARBOR SSL & INSTALLATION (Fixed for silent execution)
 # ==============================================================================
 gum style --foreground 240 "Generating Self-Signed SSL Certificates for Harbor (${REGISTRY_IP})..."
 sudo mkdir -p "${REGISTRY_CERTS_DIR}"
-sudo openssl req -newkey rsa:4096 -nodes -sha256 -keyout "${REGISTRY_CERTS_DIR}/domain.key" \
-  -addext "subjectAltName = DNS:localhost, IP:${REGISTRY_IP}, IP:127.0.0.1" \
-  -x509 -days 365 -out "${REGISTRY_CERTS_DIR}/domain.crt" \
-  -subj "/C=US/ST=State/L=City/O=Organization/CN=${REGISTRY_IP}" > /dev/null 2>&1
+
+# Create a temporary config file to force OpenSSL to execute silently
+cat > ssl-config.conf <<EOF
+[req]
+default_bits       = 4096
+prompt             = no
+default_md         = sha256
+x509_extensions    = v3_req
+distinguished_name = dn
+
+[dn]
+C  = US
+ST = State
+L  = City
+O  = Organization
+CN = ${REGISTRY_IP}
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+IP.1  = ${REGISTRY_IP}
+IP.2  = 127.0.0.1
+EOF
+
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:4096 \
+  -keyout "${REGISTRY_CERTS_DIR}/domain.key" \
+  -out "${REGISTRY_CERTS_DIR}/domain.crt" \
+  -config ssl-config.conf > /dev/null 2>&1
+
+rm -f ssl-config.conf
 
 if [ -d "/etc/pki/ca-trust/source/anchors/" ]; then
     sudo cp "${REGISTRY_CERTS_DIR}/domain.crt" /etc/pki/ca-trust/source/anchors/registry.crt
@@ -292,19 +313,17 @@ elif [ -d "/usr/local/share/ca-certificates/" ]; then
 fi
 sudo systemctl restart docker
 
-# Install Harbor using the Offline Installer
 if [ ! -d "harbor" ]; then
     gum style --foreground 240 "Extracting Harbor Offline Installer ${HARBOR_VERSION}..."
-    if [ "${INSTALL_MODE}" == "dark" ]; then
-        if [ ! -f "nkp-prereqs-bundle/harbor/harbor-offline-installer-${HARBOR_VERSION}.tgz" ]; then
-            gum style --foreground 196 "❌ ERROR: Dark Site mode detected, but offline Harbor installer is missing."
-            exit 1
-        fi
+    if [ -f "nkp-prereqs-bundle/harbor/harbor-offline-installer-${HARBOR_VERSION}.tgz" ]; then
         cp "nkp-prereqs-bundle/harbor/harbor-offline-installer-${HARBOR_VERSION}.tgz" .
     elif [ "${INSTALL_MODE}" == "internet" ]; then
         if [ ! -f "harbor-offline-installer-${HARBOR_VERSION}.tgz" ]; then
             wget -q --show-progress "https://github.com/goharbor/harbor/releases/download/${HARBOR_VERSION}/harbor-offline-installer-${HARBOR_VERSION}.tgz"
         fi
+    else
+        gum style --foreground 196 "❌ ERROR: Missing harbor offline installer, and no internet access to download it."
+        exit 1
     fi
     tar xzf harbor-offline-installer-${HARBOR_VERSION}.tgz
 fi
@@ -349,7 +368,6 @@ else
     gum style --foreground 82 "✔ Bundle already extracted."
 fi
 
-# FIX: Persist 256-color terminal setting for Phase 2 & Phase 3
 if ! grep -q "export TERM=xterm-256color" "$HOME/.bashrc"; then
     echo "export TERM=xterm-256color" >> "$HOME/.bashrc"
 fi

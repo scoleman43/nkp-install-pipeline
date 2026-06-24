@@ -75,8 +75,8 @@ if [ "$BUILD_CHOICE" == "Build a Custom NKP Image (Requires Internet or Local Mi
         INPUT_PE=$(gum input --prompt "Prism Element Cluster Name: " --placeholder "${PE_CLUSTER:-PE_Cluster_Name}")
         export PE_CLUSTER="${INPUT_PE:-${PE_CLUSTER:-}}"
         
-        INPUT_SUBNET=$(gum input --prompt "Subnet Name/UUID: " --placeholder "${SUBNET:-VLAN_UUID}")
-        export SUBNET="${INPUT_SUBNET:-${SUBNET:-}}"
+        INPUT_SUBNET_NAME=$(gum input --prompt "Subnet Name: " --placeholder "${SUBNET_NAME:-Default-Network}")
+        export SUBNET_NAME="${INPUT_SUBNET_NAME:-${SUBNET_NAME:-}}"
         
         INPUT_BASE=$(gum input --prompt "Base Image Name in PC: " --placeholder "${BASE_IMAGE_VAL:-Ubuntu_22.04_Base}")
         export BASE_IMAGE_VAL="${INPUT_BASE:-${BASE_IMAGE_VAL:-}}"
@@ -87,7 +87,7 @@ if [ "$BUILD_CHOICE" == "Build a Custom NKP Image (Requires Internet or Local Mi
             echo "export NUTANIX_USER=\"${NUTANIX_USER}\""
             echo "export NUTANIX_PASSWORD=\"${NUTANIX_PASSWORD}\""
             echo "export PE_CLUSTER=\"${PE_CLUSTER}\""
-            echo "export SUBNET=\"${SUBNET}\""
+            echo "export SUBNET_NAME=\"${SUBNET_NAME}\""
             echo "export BASE_IMAGE_VAL=\"${BASE_IMAGE_VAL}\""
         } > "$CACHE_FILE"
         chmod 600 "$CACHE_FILE"
@@ -116,7 +116,7 @@ if [ "${USE_CUSTOM_IMAGE}" == "true" ]; then
     if ! nkp create image nutanix "${OS_NAME}" \
       --endpoint="${PC_ENDPOINT}" \
       --cluster="${PE_CLUSTER}" \
-      --subnet="${SUBNET}" \
+      --subnet="${SUBNET_NAME}" \
       --source-image="${BASE_IMAGE_VAL}" \
       --insecure; then
         

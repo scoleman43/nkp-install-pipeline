@@ -3,7 +3,7 @@
 # Script: phase3.sh
 # Purpose: Gathers cluster sizing/networking details via UI and uses native 
 #          NKP automation to seamlessly deploy the air-gapped cluster.
-#          (Updated for Secure Harbor Integration & Dashboard Output)
+#          (Updated for Docker Permission Checks & Secure Harbor Integration)
 # ==============================================================================
 
 set -euo pipefail
@@ -12,9 +12,21 @@ set -euo pipefail
 export TERM="xterm-256color"
 
 # ==============================================================================
-# STEP 0: LOAD PREVIOUS PHASE DATA
+# STEP 0: LOAD & CHECK PREREQUISITES
 # ==============================================================================
 gum style --foreground 212 -- "--- Checking Prerequisites ---"
+
+# Proactive Docker Permission Check!
+if ! docker info >/dev/null 2>&1; then
+    echo ""
+    gum style --foreground 196 "❌ ERROR: Docker Permission Denied!"
+    gum style --foreground 226 "It looks like you forgot to log out and log back in after Phase 1."
+    gum style --foreground 240 "To apply your new Docker permissions and fix this immediately, either:"
+    gum style --foreground 250 "  1. Type 'exit' to disconnect, SSH back in, and rerun Phase 3."
+    gum style --foreground 250 "  2. Run the command 'newgrp docker' in this terminal, then rerun Phase 3."
+    echo ""
+    exit 1
+fi
 
 if [ -f ".nkp_version.env" ] && [ -f ".nkp_image.env" ] && [ -f ".nkp_registry.env" ]; then
     source .nkp_version.env
@@ -40,7 +52,7 @@ export PC_ENDPOINT="10.0.0.43"
 export NUTANIX_USER="admin"
 export NUTANIX_PASSWORD=""
 export PE_CLUSTER="PE_Cluster_Name"
-export SUBNET="VLAN_UUID_Goes_Here" 
+export SUBNET_NAME="Default-Network" 
 export STORAGE_CONTAINER="Default_Container"
 export CONTROL_PLANE_VIP="10.0.0.50"
 export METALLB_IP_RANGE="10.0.0.100-10.0.0.150"
@@ -96,8 +108,8 @@ fi
 INPUT_PE=$(gum input --prompt "Prism Element Cluster Name (Case-Sensitive): " --placeholder "${PE_CLUSTER}")
 export PE_CLUSTER="${INPUT_PE:-${PE_CLUSTER}}"
 
-INPUT_SUBNET=$(gum input --prompt "Subnet UUID: " --placeholder "${SUBNET}")
-export SUBNET="${INPUT_SUBNET:-${SUBNET}}"
+INPUT_SUBNET_NAME=$(gum input --prompt "Subnet Name: " --placeholder "${SUBNET_NAME}")
+export SUBNET_NAME="${INPUT_SUBNET_NAME:-${SUBNET_NAME}}"
 
 INPUT_STORAGE=$(gum input --prompt "CSI Storage Container Name: " --placeholder "${STORAGE_CONTAINER}")
 export STORAGE_CONTAINER="${INPUT_STORAGE:-${STORAGE_CONTAINER}}"
@@ -108,7 +120,7 @@ export STORAGE_CONTAINER="${INPUT_STORAGE:-${STORAGE_CONTAINER}}"
     echo "export NUTANIX_USER=\"${NUTANIX_USER}\""
     echo "export NUTANIX_PASSWORD=\"${NUTANIX_PASSWORD}\""
     echo "export PE_CLUSTER=\"${PE_CLUSTER}\""
-    echo "export SUBNET=\"${SUBNET}\""
+    echo "export SUBNET_NAME=\"${SUBNET_NAME}\""
     echo "export STORAGE_CONTAINER=\"${STORAGE_CONTAINER}\""
     echo "export CONTROL_PLANE_VIP=\"${CP_VIP}\""
     echo "export METALLB_IP_RANGE=\"${METALLB_IP_RANGE}\""
@@ -141,15 +153,13 @@ docker rm -f nkp-bootstrap-control-plane 2>/dev/null || true
 
 echo "------------------------------------------------------------------------------"
 gum style --foreground 240 "Logging local Docker engine into Harbor..."
-echo "${REGISTRY_PASS}" | docker login "${REGISTRY_URL}" -u "${REGISTRY_USER}" --password-stdin
+echo "${REGISTRY_PASS}" | docker login "${REGISTRY_URL}" -u "${REGISTRY_USER}" --password-stdin 2>/dev/null
 
-# FIX 2: Explicitly create the 'nkp' Harbor project so it doesn't throw 401
 gum style --foreground 240 "Provisioning dedicated 'nkp' project in Harbor..."
 curl -s -k -u "${REGISTRY_USER}:${REGISTRY_PASS}" -X POST "https://${REGISTRY_URL}/api/v2.0/projects" \
   -H "Content-Type: application/json" \
   -d '{"project_name": "nkp", "metadata": {"public": "true"}}' > /dev/null || true
 
-# FIX 3: Re-added the /nkp path to all the registry URLs
 gum style --foreground 212 "1/3: Pushing Konvoy Core Bundle to Harbor (${REGISTRY_URL}/nkp)..."
 nkp push bundle --bundle "nkp-${NKP_VERSION}/container-images/konvoy-image-bundle-${NKP_VERSION}.tar" \
   --to-registry="${REGISTRY_URL}/nkp" \
@@ -174,10 +184,9 @@ echo "--------------------------------------------------------------------------
 gum style --foreground 240 "Starting Native Cluster API Deployment (Streaming logs below)..."
 echo "------------------------------------------------------------------------------"
 
-# FIX 4: Re-added the /nkp path to the --registry-mirror-url
 if ! nkp create cluster nutanix --cluster-name="${CLUSTER_NAME}" \
   --control-plane-prism-element-cluster="${PE_CLUSTER}" --worker-prism-element-cluster="${PE_CLUSTER}" \
-  --control-plane-subnets="${SUBNET}" --worker-subnets="${SUBNET}" \
+  --control-plane-subnet-names="${SUBNET_NAME}" --worker-subnet-names="${SUBNET_NAME}" \
   --control-plane-endpoint-ip="${CP_VIP}" \
   --control-plane-replicas="${CONTROL_PLANE_REPLICAS}" \
   --worker-replicas="${WORKER_REPLICAS}" \
